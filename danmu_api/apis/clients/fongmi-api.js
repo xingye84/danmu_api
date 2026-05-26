@@ -361,7 +361,7 @@ function buildFongmiDanmakuItems(animes, detailStore, apiBase) {
  * @returns {Promise<Response>} 弹幕候选响应
  */
 export async function getFongmiDanmaku(url, req, clientIp = null) {
-  const { name, episode } = await parseFongmiRequestParams(url, req);
+  let { name, episode } = await parseFongmiRequestParams(url, req);
 
   if (!name) {
     return jsonResponse([], 200);
