@@ -6,6 +6,7 @@ import { convertChineseNumber, extractEpisodeTitle, extractEpisodeNumberFromTitl
 import { filterSameEpisodeTitle, getBangumiDataForMatch, searchAnime } from "../dandan-api.js";
 import { selectFongmiCandidateByAi } from "./fongmi-ai-match.js";
 import { rememberFongmiSearchContext } from "./fongmi-prefer.js";
+import { getFongmiCorrectedTitle } from "./fongmi-manual-correction.js";
 
 // =====================
 // FongMi 弹幕接口适配
@@ -376,9 +377,12 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
   }
   const searchUrl = new URL(url.toString());
   const detailStore = new Map();
-  const keywords = buildFongmiSearchKeywords(name);
+  const correctedTitle = getFongmiCorrectedTitle(name);
+  const correctedName = correctedTitle && correctedTitle !== name ? correctedTitle : "";
+  const primaryName = correctedName || name;
+  const keywords = buildFongmiSearchKeywords(primaryName);
   let animes = [];
-  let matchedKeyword = name;
+  let matchedKeyword = primaryName;
 
   for (const keyword of keywords) {
     searchUrl.searchParams.set("keyword", keyword);
@@ -387,10 +391,28 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
     animes = Array.isArray(searchData?.animes) ? searchData.animes : [];
     if (animes.length) {
       matchedKeyword = keyword;
-      if (keyword !== name) {
-        log("info", `[Fongmi] Search fallback hit: raw=${name}, keyword=${keyword}, episode=${episode}`);
+      if (keyword !== primaryName) {
+        log("info", `[Fongmi] Search fallback hit: raw=${primaryName}, keyword=${keyword}, episode=${episode}`);
       }
       break;
+    }
+  }
+
+  if (correctedName) {
+    log("info", `[Fongmi][Prefer] search corrected title first: original=${name}, corrected=${correctedName}, episode=${episode}, hit=${animes.length}`);
+  }
+
+  if (correctedName && !animes.length) {
+    log("info", `[Fongmi][Prefer] fallback original title: original=${name}, corrected=${correctedName}, episode=${episode}`);
+    for (const keyword of buildFongmiSearchKeywords(name)) {
+      searchUrl.searchParams.set("keyword", keyword);
+      const searchRes = await searchAnime(searchUrl, null, null, detailStore);
+      const searchData = await searchRes.json();
+      animes = Array.isArray(searchData?.animes) ? searchData.animes : [];
+      if (animes.length) {
+        matchedKeyword = keyword;
+        break;
+      }
     }
   }
 

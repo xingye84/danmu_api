@@ -8,6 +8,7 @@ import AIClient from './utils/ai-util.js';
 import { initBangumiData } from "./utils/bangumi-data-util.js";
 import { getBangumi, getComment, getCommentByUrl, getSegmentComment, matchAnime, searchAnime, searchEpisodes } from "./apis/dandan-api.js";
 import { getFongmiDanmaku } from "./apis/clients/fongmi-api.js";
+import { handleFongmiManualCorrection } from "./apis/clients/fongmi-manual-correction.js";
 import { handleConfig, handleUI, handleLogs, handleClearLogs, handleDeploy, handleClearCache, handleReqRecords, handleCacheAnimes } from "./apis/system-api.js";
 import { handleSetEnv, handleAddEnv, handleDelEnv, handleAiVerify } from "./apis/env-api.js";
 import { Segment } from "./models/dandan-model.js"
@@ -105,6 +106,7 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
     '/api/v2/match',
     '/api/v2/search/episodes',
     '/api/v2/fongmi/danmaku',
+    '/api/v2/fongmi/manual-correction',
     '/danmaku',
     '/api/v2/bangumi',
     '/api/v2/comment',
@@ -320,6 +322,11 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   // GET|POST /api/v2/fongmi/danmaku
   if (path === "/api/v2/fongmi/danmaku" && (method === "GET" || method === "POST")) {
     return getFongmiDanmaku(url, req, clientIp);
+  }
+
+  // POST /api/v2/fongmi/manual-correction
+  if (path === "/api/v2/fongmi/manual-correction" && method === "POST") {
+    return handleFongmiManualCorrection(req);
   }
 
   // GET|POST /danmaku
