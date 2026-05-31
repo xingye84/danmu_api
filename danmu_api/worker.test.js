@@ -41,6 +41,7 @@ import { convertToAsciiSum } from "./utils/codec-util.js";
 import { handleDanmusLike } from "./utils/danmu-util.js";
 import { Segment, SegmentListResponse } from "./models/dandan-model.js"
 import { initBangumiData, searchBangumiData, clearBangumiDataCache } from "./utils/bangumi-data-util.js";
+import { selectFongmiCandidateByAi } from "./apis/clients/fongmi-ai-match.js";
 
 // Mock Request class for testing
 class MockRequest {
@@ -204,6 +205,92 @@ test('worker.js API endpoints', async (t) => {
     });
 
     assert.equal(seenRedirectMode, 'manual');
+  });
+
+  await t.test('FongMi preferred anime should still match variety episode title text', async () => {
+    Globals.init({});
+    const globals = Globals.getConfig();
+    globals.aiValid = false;
+    globals.aiApiKey = "";
+    globals.lastSelectMap.set("音乐缘计划2", {
+      animeIds: [4844838],
+      preferBySeason: { default: 4844838 },
+      sourceBySeason: { default: "iqiyi" }
+    });
+
+    const anime = {
+      animeId: 4844838,
+      bangumiId: "m6hj8g8o5w",
+      animeTitle: "音乐缘计划第2季(2025)【综艺】from iqiyi",
+      source: "iqiyi"
+    };
+    const candidates = [
+      {
+        anime,
+        episode: {
+          episodeId: "wrong",
+          episodeTitle: "【qiyi】 先导片 周深冷笑话听懵薛之谦 先导片 周深冷笑话听懵薛之谦 黄子弘凡开局就罢录"
+        }
+      },
+      {
+        anime,
+        episode: {
+          episodeId: "right",
+          episodeTitle: "【qiyi】 年度盛典 周深刘宇宁限定合唱！ 年度盛典 周深刘宇宁限定合唱！薛之谦张靓颖《霸王别姬》回忆杀"
+        }
+      }
+    ];
+
+    const selected = await selectFongmiCandidateByAi(
+      globals,
+      "音乐缘计划2",
+      "[2.6 GB]20260102 年度盛典 周深刘宇宁限定合唱！.mkv【Y-音-粤-缘-寄-划-2】",
+      candidates,
+      "音乐缘计划2"
+    );
+
+    assert.equal(selected?.episode?.episodeId, "right");
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].episode.episodeId, "right");
+  });
+
+  await t.test('FongMi preferred anime should not use generic title words across explicit episode numbers', async () => {
+    Globals.init({});
+    const globals = Globals.getConfig();
+    globals.aiValid = false;
+    globals.aiApiKey = "";
+    globals.lastSelectMap.set("测试综艺", {
+      animeIds: [1001],
+      preferBySeason: { default: 1001 },
+      sourceBySeason: { default: "iqiyi" }
+    });
+
+    const anime = {
+      animeId: 1001,
+      bangumiId: "test-show",
+      animeTitle: "测试综艺(2026)【综艺】from iqiyi",
+      source: "iqiyi"
+    };
+    const candidates = [
+      {
+        anime,
+        episode: {
+          episodeId: "ep3",
+          episodeTitle: "【qiyi】 第3期纯享版 歌手舞台纯享"
+        }
+      }
+    ];
+
+    const selected = await selectFongmiCandidateByAi(
+      globals,
+      "测试综艺",
+      "第2期 纯享版.mkv",
+      candidates,
+      "测试综艺"
+    );
+
+    assert.equal(selected, null);
+    assert.equal(candidates.length, 1);
   });
 
   // 测试标题解析

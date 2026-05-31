@@ -10,6 +10,27 @@ const FONGMI_AI_COMPACT_LIMIT = 200;
 const FONGMI_AI_REGULAR_GROUP_MIN_SIZE = 3;
 const FONGMI_AI_REGULAR_GROUP_COVERAGE = 0.8;
 const FONGMI_AI_REGULAR_GROUP_UNSAFE_RE = /(?:第\s*\d+\s*期|[上下中](?:\s|$)|纯享|加更|花絮|先导|预告|番外|特别|彩蛋|会员|未播|直播|片段|舞台|合集|抢先|幕后)/;
+const FONGMI_EPISODE_TITLE_STOP_TOKENS = new Set([
+  "正片",
+  "纯享",
+  "纯享版",
+  "加更",
+  "花絮",
+  "先导",
+  "先导片",
+  "预告",
+  "番外",
+  "特别",
+  "彩蛋",
+  "会员",
+  "未播",
+  "直播",
+  "片段",
+  "舞台",
+  "合集",
+  "抢先",
+  "幕后"
+]);
 
 const FONGMI_AI_MATCH_PROMPT = `你是影视弹幕候选选择器。你只负责从输入候选里选择最适合当前播放内容的一项。
 
@@ -269,6 +290,11 @@ function findPreferredCandidate(name, matchedKeyword, episode, candidates) {
       return episodeCandidate;
     }
 
+    const titleOverlapCandidate = findTitleOverlapCandidate(episode, preferredCandidates);
+    if (titleOverlapCandidate) {
+      return titleOverlapCandidate;
+    }
+
     if (shouldSkipPreferredFallback(episode)) {
       log("info", `[Fongmi][Prefer] skipped fallback by lastSelectMap: key=${key}, animeId=${preferAnimeId}, source=${preferSource || ""}`);
       return null;
@@ -318,6 +344,73 @@ function extractDateToken(value) {
 function extractEpisodePartToken(value) {
   const match = String(value || "").match(/第\s*\d{1,4}\s*[集期话]\s*(?:[-_./|｜]\s*)?(?:[（(【\[]\s*)?([上中下])(?:\s*[）)】\]])?(?=\s*(?:$|[\s_.\-:：,，.。;；、]))/);
   return match ? match[1] : "";
+}
+
+function normalizeEpisodeTitleText(value) {
+  return normalizeCandidateTitle(String(value || "")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[【（(][^】）)]*[】）)]/g, " ")
+    .replace(/\.(?:mp4|mkv|avi|rmvb|ts|flv|mov|m4v)\b/gi, " ")
+    .replace(/\b(?:2160p|1080p|720p|4k|web-?dl|web-?rip|blu-?ray|hdr|dv|x265|x264|h\.?265|h\.?264|60fps|aac|flac|dts)\b/gi, " ")
+    .replace(/\b\d+(?:\.\d+)?\s*(?:gb|mb|g|m)\b/gi, " ")
+    .replace(/20\d{6}/g, " ")
+    .replace(/[_~.-]+/g, " ")
+    .replace(/[《》"'“”‘’]+/g, " ")
+    .replace(/[^\p{Script=Han}A-Za-z0-9]+/gu, " "));
+}
+
+function buildEpisodeTitleTokens(value) {
+  const text = normalizeEpisodeTitleText(value);
+  if (!text) return [];
+
+  return [...new Set(text
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(token =>
+      token.length >= 2 &&
+      !/^\d+$/.test(token) &&
+      !/^第?\d+[集期话]?$/.test(token) &&
+      !FONGMI_EPISODE_TITLE_STOP_TOKENS.has(token)))];
+}
+
+function scoreEpisodeTitleOverlap(episode, candidate) {
+  const tokens = buildEpisodeTitleTokens(episode);
+  if (!tokens.length) return 0;
+
+  const candidateText = normalizeEpisodeTitleText(candidate?.episode?.episodeTitle || "");
+  if (!candidateText) return 0;
+
+  let score = 0;
+  for (const token of tokens) {
+    if (candidateText.includes(token)) {
+      score += token.length * token.length;
+    }
+  }
+  return score;
+}
+
+function findTitleOverlapCandidate(episode, candidates) {
+  const focus = buildFongmiAiFocus(episode);
+  let scopedCandidates = candidates;
+  if (focus?.episodeNo) {
+    scopedCandidates = candidates.filter(candidate =>
+      String(extractFocusedEpisodeNo(candidate?.episode?.episodeTitle || "")) === String(focus.episodeNo));
+    if (!scopedCandidates.length) return null;
+  }
+
+  const ranked = scopedCandidates
+    .map(candidate => ({ candidate, score: scoreEpisodeTitleOverlap(episode, candidate) }))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (!ranked.length || ranked[0].score < 16) return null;
+
+  const top = ranked[0];
+  const next = ranked[1];
+  if (next && top.score === next.score) return null;
+
+  log("info", `[Fongmi][Prefer] selected episode by title overlap: score=${top.score}, episode=${top.candidate.episode?.episodeTitle || ""}`);
+  return top.candidate;
 }
 
 function buildFongmiAiFocus(episode) {
