@@ -225,6 +225,15 @@ function narrowExplicitPartCandidates(episode, candidates) {
   return true;
 }
 
+function keepOnlyCandidate(candidates, candidate) {
+  if (!candidate) return;
+  candidates.splice(0, candidates.length, candidate);
+}
+
+function keepOnlyTopCandidate(candidates) {
+  keepOnlyCandidate(candidates, candidates[0]);
+}
+
 function shouldSkipPreferredFallback(episode) {
   const focus = buildFongmiAiFocus(episode);
   return Boolean(focus?.episodeNo);
@@ -611,11 +620,18 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
   if (!candidates.length) return null;
 
   const preferredCandidate = findPreferredCandidate(name, matchedKeyword, episode, candidates);
-  if (preferredCandidate) return preferredCandidate;
+  if (preferredCandidate) {
+    keepOnlyCandidate(candidates, preferredCandidate);
+    return preferredCandidate;
+  }
 
-  if (!globals.aiValid || !globals.aiApiKey) return null;
+  if (!globals.aiValid || !globals.aiApiKey) {
+    keepOnlyTopCandidate(candidates);
+    return null;
+  }
   if (!shouldUseFongmiAi(candidates)) {
     log("info", `[Fongmi][AI] skipped: local score is confident for ${candidates[0].anime?.animeTitle || ""}`);
+    keepOnlyTopCandidate(candidates);
     return null;
   }
 
@@ -655,6 +671,7 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
           if (groupId !== null && groupId !== undefined) {
             log("warn", `[Fongmi][AI] Invalid groupId: ${groupId}`);
           }
+          keepOnlyTopCandidate(candidates);
           return null;
         }
 
@@ -670,12 +687,17 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
 
     const parsedResponse = await askFongmiAi(globals, payload, payload.mode);
     const selectedCandidate = findCandidateByAiResponse(parsedResponse, aiCandidates);
-    if (!selectedCandidate) return null;
+    if (!selectedCandidate) {
+      keepOnlyTopCandidate(candidates);
+      return null;
+    }
 
     await rememberFongmiAiCandidate(globals, name, matchedKeyword, selectedCandidate);
+    keepOnlyCandidate(candidates, selectedCandidate);
     return selectedCandidate;
   } catch (error) {
     log("error", `[Fongmi][AI] matching failed: ${error.message}`);
+    keepOnlyTopCandidate(candidates);
     return null;
   }
 }
