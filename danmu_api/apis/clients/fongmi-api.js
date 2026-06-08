@@ -271,7 +271,7 @@ async function parseFongmiRequestParams(url, req) {
       }
     }
   } catch (e) {
-    log("warn", `[Fongmi] 解析请求参数失败: ${e.message}`);
+    log("warn", `[system] [Fongmi] 解析请求参数失败: ${e.message}`);
   }
 
   return { name: "", episode: "" };
@@ -371,7 +371,7 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
   if (globals.titleMappingTable && globals.titleMappingTable.size > 0) {
     const mappedTitle = globals.titleMappingTable.get(name);
     if (mappedTitle) {
-      log("info", `[Fongmi] Title mapped from original: ${name} to: ${mappedTitle}`);
+      log("info", `[system] [Fongmi] Title mapped from original: ${name} to: ${mappedTitle}`);
       name = mappedTitle;
     }
   }
@@ -392,7 +392,7 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
     if (animes.length) {
       matchedKeyword = keyword;
       if (keyword !== primaryName) {
-        log("info", `[Fongmi] Search fallback hit: raw=${primaryName}, keyword=${keyword}, episode=${episode}`);
+        log("info", `[system] [Fongmi] Search fallback hit: raw=${primaryName}, keyword=${keyword}, episode=${episode}`);
       }
       break;
     }
@@ -417,7 +417,7 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
   }
 
   if (!animes.length) {
-    log("info", `[Fongmi] No danmaku candidates for name=${name}, episode=${episode}`);
+    log("info", `[system] [Fongmi] No danmaku candidates for name=${name}, episode=${episode}`);
     return jsonResponse([], 200);
   }
 
@@ -448,6 +448,6 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
     if (items.length >= 1000) break;
   }
 
-  log("info", `[Fongmi] name=${name}, episode=${episode}, candidates=${items.length}`);
+  log("info", `[system] [Fongmi] name=${name}, episode=${episode}, candidates=${items.length}`);
   return jsonResponse(items, 200);
 }
