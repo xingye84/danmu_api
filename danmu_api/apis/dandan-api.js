@@ -439,13 +439,17 @@ async function executeSourceHandlers(resultData, queryTitle, targetAnimesList, r
 }
 
 // Extracted function for GET /api/v2/search/anime
-export async function searchAnime(url, preferAnimeId = null, preferSource = null, detailStore = null, targetPlatform = null) {
+export async function searchAnime(url, preferAnimeId = null, preferSource = null, detailStore = null, targetPlatform = null, options = {}) {
   let queryTitle = url.searchParams.get("keyword");
   let querySeason = url.searchParams.get("season");
   querySeason = querySeason ? parseInt(querySeason, 10) : null;
   let queryEpisode = url.searchParams.get("episode");
   queryEpisode = queryEpisode ? parseInt(queryEpisode, 10) : null;
   log("info", `[system] [searchAnime] Search anime with keyword: ${queryTitle}, target season: ${querySeason}, target episode: ${queryEpisode}`);
+  const sourceOrderOverride = Array.isArray(options?.sourceOrderOverride) ? options.sourceOrderOverride : null;
+  const searchSourceOrder = sourceOrderOverride !== null ? sourceOrderOverride : globals.sourceOrderArr;
+  const cacheKeySuffix = options?.cacheKeySuffix ? `::${options.cacheKeySuffix}` : "";
+  const cacheEmptyResults = options?.cacheEmptyResults === true;
 
   // 关键字为空直接返回，不用多余查询
   if (queryTitle === "") {
@@ -465,14 +469,14 @@ export async function searchAnime(url, preferAnimeId = null, preferSource = null
   }
 
   const requestAnimeDetailsMap = detailStore instanceof Map ? detailStore : new Map();
-  const cacheKey = querySeason !== null ? `${queryTitle}_S${querySeason}` : queryTitle;
+  const cacheKey = `${querySeason !== null ? `${queryTitle}_S${querySeason}` : queryTitle}${cacheKeySuffix}`;
 
   // 检查搜索缓存
   let cachedResults = getSearchCache(cacheKey, requestAnimeDetailsMap);
 
   // 如果带季度的特定缓存未命中，尝试获取不带季度的通用搜索缓存
   if (cachedResults === null && querySeason !== null) {
-    const genericCachedResults = getSearchCache(queryTitle, requestAnimeDetailsMap);
+    const genericCachedResults = getSearchCache(`${queryTitle}${cacheKeySuffix}`, requestAnimeDetailsMap);
     if (genericCachedResults !== null) {
       log("info", `[system] [searchAnime] Cache miss for ${cacheKey}, fallback to generic cache for ${queryTitle}`);
       cachedResults = genericCachedResults;
@@ -480,6 +484,15 @@ export async function searchAnime(url, preferAnimeId = null, preferSource = null
   }
 
   if (cachedResults !== null) {
+    if (cacheEmptyResults && cachedResults.length === 0) {
+      return jsonResponse({
+        errorCode: 0,
+        success: true,
+        errorMessage: "",
+        animes: [],
+      });
+    }
+
     let satisfied = checkEpisodeSatisfied(cachedResults, querySeason, queryEpisode, requestAnimeDetailsMap, targetPlatform);
     if (satisfied) {
       return jsonResponse({
@@ -495,7 +508,7 @@ export async function searchAnime(url, preferAnimeId = null, preferSource = null
       let cacheMissed = false;
       
       while (!satisfied && !cacheMissed) {
-        const nextCacheKey = `${queryTitle}_S${currentS}`;
+        const nextCacheKey = `${queryTitle}_S${currentS}${cacheKeySuffix}`;
         const nextCache = getSearchCache(nextCacheKey, requestAnimeDetailsMap);
         if (nextCache !== null && nextCache.length > 0) {
           combinedCachedResults.push(...nextCache);
@@ -599,14 +612,14 @@ export async function searchAnime(url, preferAnimeId = null, preferSource = null
 
   try {
     // 根据 sourceOrderArr 动态构建逐源管道：每个源形成独立的 search → handleAnimes 流水线
-    log("info", `[system] [LogVar-API] Search sourceOrderArr: ${globals.sourceOrderArr}`);
+    log("info", `[system] [LogVar-API] Search sourceOrderArr: ${searchSourceOrder}`);
 
     // 存储各源搜索结果的容器，供S2+季度扩展逻辑读取
     const resultData = {};
 
     // 源Key到对应搜索Promise的映射
     const sourceSearchMap = {};
-    for (const source of globals.sourceOrderArr) {
+    for (const source of searchSourceOrder) {
       if (source === "360") sourceSearchMap[source] = sourceLogContext.run(toLogSourceName(source), () => kan360Source.search(queryTitle));
       else if (source === "vod") sourceSearchMap[source] = sourceLogContext.run(toLogSourceName(source), () => vodSource.search(queryTitle, preferAnimeId, preferSource));
       else if (source === "tmdb") sourceSearchMap[source] = sourceLogContext.run(toLogSourceName(source), () => tmdbSource.search(queryTitle));
@@ -632,7 +645,7 @@ export async function searchAnime(url, preferAnimeId = null, preferSource = null
 
     // 构建逐源管道：每个源 search 完成后，通过 executeSourceHandlers 处理 handleAnimes
     // 传入仅含当前源数据的 resultData，使 executeSourceHandlers 仅处理该源
-    const pipelineTasks = globals.sourceOrderArr.map(source => {
+    const pipelineTasks = searchSourceOrder.map(source => {
       const isolatedAnimes = [];
       const isolatedDetailStore = new Map();
       const pipelinePromise = sourceSearchMap[source].then(async searchResult => {
@@ -674,7 +687,7 @@ export async function searchAnime(url, preferAnimeId = null, preferSource = null
     }
 
     // 缓存首季/默认请求结果，剥离附加链接
-    if (curAnimes.length > 0) {
+    if (curAnimes.length > 0 || cacheEmptyResults) {
       setSearchCache(cacheKey, curAnimes.map(({ links, ...pureAnime }) => pureAnime), requestAnimeDetailsMap);
     }
 
@@ -684,7 +697,7 @@ export async function searchAnime(url, preferAnimeId = null, preferSource = null
     // 若未包含且用户指定了季度，推导最大季并并行映射 S2、S3 等结果，合并同一次搜索下的后续季以辅助跨季匹配
     if (!isEpisodeSatisfied && querySeason !== null) {
       let maxSeason = querySeason;
-      for (const source of globals.sourceOrderArr) {
+      for (const source of searchSourceOrder) {
         const rawAnimes = resultData[source];
         if (Array.isArray(rawAnimes)) {
           for (const item of rawAnimes) {
@@ -707,7 +720,7 @@ export async function searchAnime(url, preferAnimeId = null, preferSource = null
             await executeSourceHandlers(resultData, queryTitle, seasonAnimes, requestAnimeDetailsMap, s, preferAnimeId, preferSource);
             // 缓存额外季度的结果
             if (seasonAnimes.length > 0) {
-              setSearchCache(`${queryTitle}_S${s}`, seasonAnimes.map(({ links, ...pureAnime }) => pureAnime), requestAnimeDetailsMap);
+              setSearchCache(`${queryTitle}_S${s}${cacheKeySuffix}`, seasonAnimes.map(({ links, ...pureAnime }) => pureAnime), requestAnimeDetailsMap);
             }
             return seasonAnimes;
           })());
@@ -788,8 +801,7 @@ export async function searchAnime(url, preferAnimeId = null, preferSource = null
     const responseAnimes = curAnimes.map(({ links, ...pureAnime }) => pureAnime);
 
     // 缓存搜索结果
-    if (responseAnimes.length > 0) {
-      const cacheKey = querySeason !== null ? `${queryTitle}_S${querySeason}` : queryTitle;
+    if (responseAnimes.length > 0 || cacheEmptyResults) {
       setSearchCache(cacheKey, responseAnimes, requestAnimeDetailsMap);
     }
 

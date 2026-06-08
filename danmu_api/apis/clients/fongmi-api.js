@@ -3,10 +3,11 @@ import { jsonResponse } from "../../utils/http-util.js";
 import { log } from "../../utils/log-util.js";
 import { simplized } from "../../utils/zh-util.js";
 import { convertChineseNumber, extractEpisodeTitle, extractEpisodeNumberFromTitle, normalizeSpaces } from "../../utils/common-util.js";
-import { filterSameEpisodeTitle, getBangumiDataForMatch, searchAnime } from "../dandan-api.js";
+import { filterSameEpisodeTitle, getBangumiDataForMatch } from "../dandan-api.js";
 import { selectFongmiCandidateByAi } from "./fongmi-ai-match.js";
 import { rememberFongmiSearchContext } from "./fongmi-prefer.js";
 import { getFongmiCorrectedTitle } from "./fongmi-manual-correction.js";
+import { searchFongmiAnimeBySourcePreference as searchAnime } from "./fongmi-source-preference.js";
 
 // =====================
 // FongMi 弹幕接口适配
