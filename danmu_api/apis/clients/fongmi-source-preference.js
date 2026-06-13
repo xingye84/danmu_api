@@ -3,17 +3,26 @@ import { getPreferAnimeId } from "../../utils/cache-util.js";
 import { jsonResponse } from "../../utils/http-util.js";
 import { log } from "../../utils/log-util.js";
 import { searchAnime } from "../dandan-api.js";
+import { normalizeFongmiDetailStoreEpisodeTitles } from "./fongmi-display-title.js";
 
 function toSearchAnimes(searchData) {
   return Array.isArray(searchData?.animes) ? searchData.animes : [];
 }
 
 async function searchWithSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, sources, cacheKeySuffix) {
-  return searchAnime(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, {
+  const response = await searchAnime(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, {
     sourceOrderOverride: sources,
     cacheKeySuffix,
     cacheEmptyResults: true
   });
+  normalizeFongmiDetailStoreEpisodeTitles(detailStore);
+  return response;
+}
+
+async function searchWithDefaultSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform) {
+  const response = await searchAnime(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform);
+  normalizeFongmiDetailStoreEpisodeTitles(detailStore);
+  return response;
 }
 
 export async function searchFongmiAnimeBySourcePreference(searchUrl, preferAnimeId = null, preferSource = null, detailStore = null, targetPlatform = null) {
@@ -22,7 +31,7 @@ export async function searchFongmiAnimeBySourcePreference(searchUrl, preferAnime
   const canUsePreferredSource = savedSource && globals.sourceOrderArr.includes(savedSource);
 
   if (!canUsePreferredSource) {
-    return searchAnime(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform);
+    return searchWithDefaultSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform);
   }
 
   const preferredRes = await searchWithSourceOrder(
