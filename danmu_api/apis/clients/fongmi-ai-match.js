@@ -379,10 +379,13 @@ function scoreEpisodeTitleOverlap(episode, candidate) {
 
   const candidateText = normalizeEpisodeTitleText(candidate?.episode?.episodeTitle || "");
   if (!candidateText) return 0;
+  const compactCandidateText = candidateText.replace(/\s+/g, "");
 
   let score = 0;
   for (const token of tokens) {
-    if (candidateText.includes(token)) {
+    const compactToken = token.replace(/\s+/g, "");
+    const matchesAcrossPunctuation = compactToken.length >= 4 && compactCandidateText.includes(compactToken);
+    if (candidateText.includes(token) || matchesAcrossPunctuation) {
       score += token.length * token.length;
     }
   }
@@ -716,6 +719,15 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
   if (preferredCandidate) {
     keepOnlyCandidate(candidates, preferredCandidate);
     return preferredCandidate;
+  }
+
+  const candidatesFromSameWork = candidates.every(candidate => sameCandidateWork(candidates[0], candidate));
+  if (candidatesFromSameWork) {
+    const titleOverlapCandidate = findTitleOverlapCandidate(episode, candidates);
+    if (titleOverlapCandidate) {
+      keepOnlyCandidate(candidates, titleOverlapCandidate);
+      return titleOverlapCandidate;
+    }
   }
 
   if (!globals.aiValid || !globals.aiApiKey) {
