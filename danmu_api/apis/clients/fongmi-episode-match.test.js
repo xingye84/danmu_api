@@ -71,3 +71,58 @@ test("FongMi should match episode titles across punctuation differences", async 
   assert.equal(candidatesWithoutPreference.length, 1);
   assert.equal(candidatesWithoutPreference[0].episode.episodeId, "episode-12");
 });
+
+test("FongMi should ignore a leading question phrase in the raw title", async () => {
+  Globals.init({});
+  const globals = Globals.getConfig();
+  globals.aiValid = false;
+  globals.aiApiKey = "";
+  globals.lastSelectMap.clear();
+
+  const anime = {
+    animeId: 209358,
+    bangumiId: "efbfbd3cefbfbd64efbf",
+    animeTitle: "圆桌派 第三季(2018)【电视剧】from youku",
+    source: "youku"
+  };
+  globals.lastSelectMap.set("圆桌派第三季", {
+    animeIds: [anime.animeId],
+    preferBySeason: { default: anime.animeId },
+    sourceBySeason: { default: anime.source }
+  });
+
+  const candidates = [
+    {
+      anime,
+      episode: {
+        episodeId: "episode-4",
+        episodeNumber: 4,
+        episodeTitle: "【youku】 第4集 爱哭：何时你变得爱哭了？"
+      },
+      index: 3,
+      score: 11197
+    },
+    {
+      anime,
+      episode: {
+        episodeId: "episode-13",
+        episodeNumber: 13,
+        episodeTitle: "【youku】 第13集 面对逆境 是消极退赛还是背水一战"
+      },
+      index: 12,
+      score: 188
+    }
+  ];
+
+  const selected = await selectFongmiCandidateByAi(
+    globals,
+    "圆桌派 第三季",
+    "如何面对逆境.mp4【圆桌派 第3季.全24集】",
+    candidates,
+    "圆桌派第三季"
+  );
+
+  assert.equal(selected?.episode?.episodeId, "episode-13");
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].episode.episodeId, "episode-13");
+});

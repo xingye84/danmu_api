@@ -31,6 +31,7 @@ const FONGMI_EPISODE_TITLE_STOP_TOKENS = new Set([
   "抢先",
   "幕后"
 ]);
+const FONGMI_EPISODE_TITLE_QUESTION_PREFIX_RE = /^(?:如何|怎么|怎样|为何|为什么|是否)/;
 
 const FONGMI_AI_MATCH_PROMPT = `你是影视弹幕候选选择器。你只负责从输入候选里选择最适合当前播放内容的一项。
 
@@ -384,9 +385,14 @@ function scoreEpisodeTitleOverlap(episode, candidate) {
   let score = 0;
   for (const token of tokens) {
     const compactToken = token.replace(/\s+/g, "");
-    const matchesAcrossPunctuation = compactToken.length >= 4 && compactCandidateText.includes(compactToken);
-    if (candidateText.includes(token) || matchesAcrossPunctuation) {
-      score += token.length * token.length;
+    const conciseToken = compactToken.replace(FONGMI_EPISODE_TITLE_QUESTION_PREFIX_RE, "");
+    const variants = [compactToken];
+    if (conciseToken.length >= 4 && conciseToken !== compactToken) variants.push(conciseToken);
+    const matchedVariant = variants.find(variant =>
+      variant.length >= 4 && compactCandidateText.includes(variant));
+    if (candidateText.includes(token) || matchedVariant) {
+      const matchedLength = matchedVariant?.length || token.length;
+      score += matchedLength * matchedLength;
     }
   }
   return score;

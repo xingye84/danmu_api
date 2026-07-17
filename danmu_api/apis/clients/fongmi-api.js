@@ -23,7 +23,7 @@ const FONGMI_TITLE_CLEAN_RULES = [
 const FONGMI_EPISODE_CLEAN_RULES = [
   [/\[[^\]]*\]/g, " "],
   [/[【（(][^】）)]*[】）)]/g, " "],
-  [/\.(mp4|mkv|avi|rmvb|ts|flv|mov|m4v)$/gi, " "],
+  [/\.(mp4|mkv|avi|rmvb|ts|flv|mov|m4v)\s*$/gi, " "],
   [/\b(?:2160p|1080p|720p|4k|web-?dl|web-?rip|blu-?ray|hdr|dv|x265|x264|h\.?265|h\.?264|60fps|aac|flac|dts)\b/gi, " "],
   [/[_~.-]+/g, " "]
 ];
