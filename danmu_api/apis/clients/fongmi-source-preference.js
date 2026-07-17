@@ -9,6 +9,27 @@ function toSearchAnimes(searchData) {
   return Array.isArray(searchData?.animes) ? searchData.animes : [];
 }
 
+/**
+ * 为“剧名2”这类媒体库标题生成明确的季度搜索词。
+ * @param {string[]} keywords 已清洗的 FongMi 搜索词
+ * @returns {string[]} 明确季度搜索词
+ */
+export function buildFongmiCompactSeasonKeywords(keywords) {
+  const variants = [];
+
+  for (const keyword of keywords) {
+    const seasonMatch = String(keyword || "").match(/^(.*\D)([1-9]\d?)$/);
+    if (!seasonMatch) continue;
+
+    const variant = `${seasonMatch[1]}第${seasonMatch[2]}季`;
+    if (!keywords.includes(variant) && !variants.includes(variant)) {
+      variants.push(variant);
+    }
+  }
+
+  return variants;
+}
+
 async function searchWithSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, sources, cacheKeySuffix) {
   const response = await searchAnime(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, {
     sourceOrderOverride: sources,

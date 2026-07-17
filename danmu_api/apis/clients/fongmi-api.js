@@ -7,7 +7,7 @@ import { filterSameEpisodeTitle, getBangumiDataForMatch } from "../dandan-api.js
 import { selectFongmiCandidateByAi } from "./fongmi-ai-match.js";
 import { rememberFongmiSearchContext } from "./fongmi-prefer.js";
 import { getFongmiCorrectedTitle } from "./fongmi-manual-correction.js";
-import { searchFongmiAnimeBySourcePreference as searchAnime } from "./fongmi-source-preference.js";
+import { buildFongmiCompactSeasonKeywords, searchFongmiAnimeBySourcePreference as searchAnime } from "./fongmi-source-preference.js";
 
 // =====================
 // FongMi 弹幕接口适配
@@ -189,6 +189,8 @@ function buildFongmiSearchKeywords(name) {
   if (plainBracketName && plainBracketName !== rawName) {
     pushKeyword(plainBracketName);
   }
+
+  buildFongmiCompactSeasonKeywords(keywords).forEach(pushKeyword);
 
   return keywords.sort((a, b) => a.length - b.length);
 }
