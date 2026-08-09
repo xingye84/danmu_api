@@ -33,8 +33,7 @@ export function buildFongmiCompactSeasonKeywords(keywords) {
 async function searchWithSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, sources, cacheKeySuffix) {
   const response = await searchAnime(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, {
     sourceOrderOverride: sources,
-    cacheKeySuffix,
-    cacheEmptyResults: true
+    cacheKeySuffix
   });
   normalizeFongmiDetailStoreEpisodeTitles(detailStore);
   return response;
