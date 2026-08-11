@@ -2071,7 +2071,8 @@ export async function matchAnime(url, req, clientIp) {
           "type": resAnime.type,
           "typeDescription": resAnime.typeDescription,
           "shift": 0,
-          "imageUrl": resAnime.imageUrl
+          "imageUrl": resAnime.imageUrl,
+          "url": resEpisode.url || ""
         })
       ]
     }
