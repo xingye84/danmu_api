@@ -389,7 +389,7 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
 
   for (const keyword of keywords) {
     searchUrl.searchParams.set("keyword", keyword);
-    const searchRes = await searchAnime(searchUrl, null, null, detailStore);
+    const searchRes = await searchAnime(searchUrl, null, null, detailStore, null, name);
     const searchData = await searchRes.json();
     animes = Array.isArray(searchData?.animes) ? searchData.animes : [];
     if (animes.length) {
@@ -409,7 +409,7 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
     log("info", `[Fongmi][Prefer] fallback original title: original=${name}, corrected=${correctedName}, episode=${episode}`);
     for (const keyword of buildFongmiSearchKeywords(name)) {
       searchUrl.searchParams.set("keyword", keyword);
-      const searchRes = await searchAnime(searchUrl, null, null, detailStore);
+      const searchRes = await searchAnime(searchUrl, null, null, detailStore, null, name);
       const searchData = await searchRes.json();
       animes = Array.isArray(searchData?.animes) ? searchData.animes : [];
       if (animes.length) {

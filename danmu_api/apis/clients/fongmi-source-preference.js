@@ -45,9 +45,9 @@ async function searchWithDefaultSourceOrder(searchUrl, preferAnimeId, preferSour
   return response;
 }
 
-export async function searchFongmiAnimeBySourcePreference(searchUrl, preferAnimeId = null, preferSource = null, detailStore = null, targetPlatform = null) {
+export async function searchFongmiAnimeBySourcePreference(searchUrl, preferAnimeId = null, preferSource = null, detailStore = null, targetPlatform = null, preferTitle = null) {
   const keyword = searchUrl.searchParams.get("keyword");
-  const [, savedSource] = getPreferAnimeId(keyword);
+  const [, savedSource] = getPreferAnimeId(preferTitle || keyword);
   const canUsePreferredSource = savedSource && globals.sourceOrderArr.includes(savedSource);
 
   if (!canUsePreferredSource) {

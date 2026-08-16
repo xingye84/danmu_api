@@ -262,7 +262,7 @@ function shouldSkipPreferredFallback(episode) {
 }
 
 function findPreferredCandidate(name, matchedKeyword, episode, candidates) {
-  const keys = [...new Set([matchedKeyword, name].filter(Boolean))];
+  const keys = [...new Set([name, matchedKeyword].filter(Boolean))];
 
   for (const key of keys) {
     const [preferAnimeId, preferSource] = getPreferAnimeId(key);
