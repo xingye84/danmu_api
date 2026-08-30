@@ -15,23 +15,9 @@ import { getImdbepisodes } from "./utils/imdb-util.js";
 import { getTMDBChineseTitle, getTmdbJpDetail, searchTmdbTitles } from "./utils/tmdb-util.js";
 import { getDoubanDetail, getDoubanInfoByImdbId, searchDoubanTitles } from "./utils/douban-util.js";
 import AIClient from './utils/ai-util.js';
-import RenrenSource from "./sources/renren.js";
-import HanjutvSource from "./sources/hanjutv.js";
-import BahamutSource from "./sources/bahamut.js";
-import TencentSource from "./sources/tencent.js";
-import IqiyiSource from "./sources/iqiyi.js";
-import MangoSource from "./sources/mango.js";
+import { getSourceByKey } from './sources/registry.js';
 import BilibiliSource from "./sources/bilibili.js";
-import YoukuSource from "./sources/youku.js";
-import MiguSource from "./sources/migu.js";
-import SohuSource from "./sources/sohu.js";
-import LeshiSource from "./sources/leshi.js";
-import XiguaSource from "./sources/xigua.js";
-import MaiduiduiSource from "./sources/maiduidui.js";
-import AiyifanSource from "./sources/aiyifan.js";
-import HongguoSource, { parseHongguoPlayerUrl } from "./sources/hongguo.js";
-import AnimekoSource from "./sources/animeko.js";
-import OtherSource from "./sources/other.js";
+import { parseHongguoPlayerUrl } from "./sources/hongguo.js";
 import { NodeHandler } from "./configs/handlers/node-handler.js";
 import { VercelHandler } from "./configs/handlers/vercel-handler.js";
 import { NetlifyHandler } from "./configs/handlers/netlify-handler.js";
@@ -165,23 +151,23 @@ const urlPrefix = "http://localhost:9321";
 const token = "87654321";
 
 test('worker.js API endpoints', async (t) => {
-  const renrenSource = new RenrenSource();
-  const hanjutvSource = new HanjutvSource();
-  const bahamutSource = new BahamutSource();
-  const tencentSource = new TencentSource();
-  const iqiyiSource = new IqiyiSource();
-  const mangoSource = new MangoSource();
-  const bilibiliSource = new BilibiliSource();
-  const youkuSource = new YoukuSource();
-  const miguSource = new MiguSource();
-  const sohuSource = new SohuSource();
-  const leshiSource = new LeshiSource();
-  const xiguaSource = new XiguaSource();
-  const maiduiduiSource = new MaiduiduiSource();
-  const aiyifanSource = new AiyifanSource();
-  const hongguoSource = new HongguoSource();
-  const animekoSource = new AnimekoSource();
-  const otherSource = new OtherSource();
+  const renrenSource = getSourceByKey('renren');
+  const hanjutvSource = getSourceByKey('hanjutv');
+  const bahamutSource = getSourceByKey('bahamut');
+  const tencentSource = getSourceByKey('tencent');
+  const iqiyiSource = getSourceByKey('iqiyi');
+  const mangoSource = getSourceByKey('imgo');
+  const bilibiliSource = getSourceByKey('bilibili');
+  const youkuSource = getSourceByKey('youku');
+  const miguSource = getSourceByKey('migu');
+  const sohuSource = getSourceByKey('sohu');
+  const leshiSource = getSourceByKey('leshi');
+  const xiguaSource = getSourceByKey('xigua');
+  const maiduiduiSource = getSourceByKey('maiduidui');
+  const aiyifanSource = getSourceByKey('aiyifan');
+  const hongguoSource = getSourceByKey('hongguo');
+  const animekoSource = getSourceByKey('animeko');
+  const otherSource = getSourceByKey('other');
 
   await t.test('GET / should return welcome message', async () => {
     const req = new MockRequest(urlPrefix, { method: 'GET' });
@@ -392,9 +378,9 @@ test('worker.js API endpoints', async (t) => {
     });
 
     await t.test('maps match input, honors qualifiers and manual season preference, then falls back to original', async () => {
-      const originalSearch = TencentSource.prototype.search;
-      const originalHandleAnimes = TencentSource.prototype.handleAnimes;
-      const originalGetComments = TencentSource.prototype.getComments;
+      const originalSearch = tencentSource.search;
+      const originalHandleAnimes = tencentSource.handleAnimes;
+      const originalGetComments = tencentSource.getComments;
       const originalAiAsk = AIClient.prototype.ask;
       const originalOrder = Globals.envs.sourceOrderArr;
       const originalAiValid = Globals.aiValid;
@@ -402,11 +388,11 @@ test('worker.js API endpoints', async (t) => {
       let aiMatchInput = null;
       let scenario = 'open';
 
-      TencentSource.prototype.search = async keyword => {
+      tencentSource.search = async keyword => {
         searchKeywords.push(keyword);
         return [{ keyword }];
       };
-      TencentSource.prototype.handleAnimes = async (_source, title, results, details) => {
+      tencentSource.handleAnimes = async (_source, title, results, details) => {
         const add = anime => {
           results.push(anime);
           details.set(String(anime.animeId), anime);
@@ -437,7 +423,7 @@ test('worker.js API endpoints', async (t) => {
         }
         add(createFavoriteAnime(title, 70, 930003));
       };
-      TencentSource.prototype.getComments = async () => [{ p: '1,1,16777215,test', m: 'mapping-test' }];
+      tencentSource.getComments = async () => [{ p: '1,1,16777215,test', m: 'mapping-test' }];
       Globals.envs.sourceOrderArr = ['tencent'];
 
       const runMatch = async (env, fileName, useAi = false) => {
@@ -574,9 +560,9 @@ test('worker.js API endpoints', async (t) => {
         assert.equal(body.matches[0].animeTitle, '原始剧');
         assert.deepEqual(searchKeywords, ['缺失目标', '原始剧']);
       } finally {
-        TencentSource.prototype.search = originalSearch;
-        TencentSource.prototype.handleAnimes = originalHandleAnimes;
-        TencentSource.prototype.getComments = originalGetComments;
+        tencentSource.search = originalSearch;
+        tencentSource.handleAnimes = originalHandleAnimes;
+        tencentSource.getComments = originalGetComments;
         AIClient.prototype.ask = originalAiAsk;
         Globals.envs.sourceOrderArr = originalOrder;
         Globals.aiValid = originalAiValid;
@@ -991,15 +977,15 @@ test('worker.js API endpoints', async (t) => {
       favorite.timestamp = originalTimestamp;
       favorite.lastRefreshAt = originalTimestamp;
 
-      const originalSearch = TencentSource.prototype.search;
-      const originalHandleAnimes = TencentSource.prototype.handleAnimes;
+      const originalSearch = tencentSource.search;
+      const originalHandleAnimes = tencentSource.handleAnimes;
       const originalOrder = Globals.envs.sourceOrderArr;
       let searchCount = 0;
-      TencentSource.prototype.search = async () => {
+      tencentSource.search = async () => {
         searchCount++;
         return [{}];
       };
-      TencentSource.prototype.handleAnimes = async (_source, _title, results, details) => {
+      tencentSource.handleAnimes = async (_source, _title, results, details) => {
         results.push(refreshedAnime);
         details.set(String(refreshedAnime.animeId), refreshedAnime);
       };
@@ -1020,8 +1006,8 @@ test('worker.js API endpoints', async (t) => {
         assert.ok(resolveFavoriteForKeyword('刷新测试').entry.lastRefreshAt > originalTimestamp);
         assert.equal(listFavorites()[0].lastRefreshAt, resolveFavoriteForKeyword('刷新测试').entry.lastRefreshAt);
       } finally {
-        TencentSource.prototype.search = originalSearch;
-        TencentSource.prototype.handleAnimes = originalHandleAnimes;
+        tencentSource.search = originalSearch;
+        tencentSource.handleAnimes = originalHandleAnimes;
         Globals.envs.sourceOrderArr = originalOrder;
       }
     });
@@ -2943,8 +2929,6 @@ test('worker.js API endpoints', async (t) => {
 //     }
 //   });
 // });
-
-});
 
 // // 测试 Bangumi Data 数据下载时机（ensureBangumiDataReady）、配置变更触发下载（syncBangumiDataLifecycleOnConfigChange）
 // // 以及 getTMDBChineseTitle 漏写 await 的修复；与 envs RAW_ENV_KEYS 测试同为按需启用的内部测试

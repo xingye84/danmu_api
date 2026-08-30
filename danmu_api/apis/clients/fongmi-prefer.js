@@ -28,6 +28,8 @@ export function rememberFongmiCommentPreference(commentId, animeTitle, clientIp)
 
   const lastSearch = getLastSearch(clientIp);
   if (!lastSearch?.title || !titleMatches(animeTitle, lastSearch.title)) return;
+  if (lastSearch.episodeId !== null && lastSearch.episodeId !== undefined &&
+      String(lastSearch.episodeId) === String(commentId)) return;
 
   const [animeId, source] = findAnimeIdByCommentId(commentId);
   if (!animeId || !source) return;
