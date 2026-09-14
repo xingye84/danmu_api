@@ -214,3 +214,55 @@ test("FongMi preferred anime should not use generic title words across explicit 
   assert.equal(selected, null);
   assert.equal(candidates.length, 1);
 });
+
+test("FongMi preferred anime should use episodeNumber when title has a suffix number", async () => {
+  Globals.init({});
+  const globals = Globals.getConfig();
+  globals.aiValid = false;
+  globals.aiApiKey = "";
+  globals.lastSelectMap.clear();
+
+  const preferredAnime = {
+    animeId: 2597187,
+    bangumiId: "b467b61f66ef4f8d88786047dede8912",
+    animeTitle: "京华春梦(粤)【剧集】from maiduidui",
+    source: "maiduidui"
+  };
+  const otherAnime = {
+    animeId: 4895232,
+    bangumiId: "c53e59903c7c11eca22a9c7da384e5a3",
+    animeTitle: "京华春梦(普通话)【剧集】from maiduidui",
+    source: "maiduidui"
+  };
+  globals.lastSelectMap.set("https://pan.quark.cn/s/example", {
+    animeIds: [preferredAnime.animeId],
+    preferBySeason: { default: preferredAnime.animeId },
+    sourceBySeason: { default: preferredAnime.source },
+    explicitBySeason: { default: true }
+  });
+
+  const candidates = [
+    {
+      anime: preferredAnime,
+      episode: { episodeId: "30173", episodeNumber: 2, episodeTitle: "【maiduidui】 京华春梦(粤)02" },
+      index: 1
+    },
+    {
+      anime: otherAnime,
+      episode: { episodeId: "30198", episodeNumber: 2, episodeTitle: "【maiduidui】 京华春梦(普通话)02" },
+      index: 1
+    }
+  ];
+
+  const selected = await selectFongmiCandidateByAi(
+    globals,
+    "https://pan.quark.cn/s/example",
+    "Yesterdays.Glitter.S01E02.mkv",
+    candidates,
+    "京华春梦"
+  );
+
+  assert.equal(selected?.episode?.episodeId, "30173");
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].anime.animeId, preferredAnime.animeId);
+});

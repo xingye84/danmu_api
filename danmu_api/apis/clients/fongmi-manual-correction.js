@@ -47,6 +47,7 @@ function buildManualCorrectionEntry(oldValue, animeId, source, searchName) {
   animeIds.add(animeId);
   const preferBySeason = oldValue?.preferBySeason ? { ...oldValue.preferBySeason } : {};
   const sourceBySeason = oldValue?.sourceBySeason ? { ...oldValue.sourceBySeason } : {};
+  const explicitBySeason = { ...(oldValue?.explicitBySeason || {}), default: true };
   if (oldValue?.prefer !== undefined) preferBySeason.default = oldValue.prefer;
   if (oldValue?.source !== undefined) sourceBySeason.default = oldValue.source;
   preferBySeason.default = animeId;
@@ -55,6 +56,7 @@ function buildManualCorrectionEntry(oldValue, animeId, source, searchName) {
   return {
     animeIds: [...animeIds],
     preferBySeason,
+    explicitBySeason,
     ...(Object.keys(sourceBySeason).length > 0 && { sourceBySeason }),
     ...(oldValue?.offsets !== undefined && { offsets: oldValue.offsets }),
     ...(searchName && { fongmiCorrectedTitle: searchName })

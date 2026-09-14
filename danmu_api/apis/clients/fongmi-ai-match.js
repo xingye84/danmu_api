@@ -186,6 +186,14 @@ function extractEpisodeNoFromRawEpisode(episode) {
   return null;
 }
 
+function extractCandidateEpisodeNo(candidate) {
+  const titleEpisodeNo = extractFocusedEpisodeNo(candidate?.episode?.episodeTitle || "");
+  if (titleEpisodeNo !== null) return titleEpisodeNo;
+
+  const episodeNumber = Number.parseInt(candidate?.episode?.episodeNumber, 10);
+  return Number.isInteger(episodeNumber) && episodeNumber > 0 ? String(episodeNumber) : null;
+}
+
 function findRegularEpisodeCandidate(episode, candidates) {
   const targetEpisodeNo = extractEpisodeNoFromRawEpisode(episode);
   if (!targetEpisodeNo) return null;
@@ -201,10 +209,9 @@ function findFocusedEpisodeCandidate(episode, candidates) {
   const focus = buildFongmiAiFocus(episode);
   if (!focus?.episodeNo) return null;
 
-  let matches = candidates.filter(candidate => {
-    const title = candidate?.episode?.episodeTitle || "";
-    return String(extractFocusedEpisodeNo(title)) === String(focus.episodeNo);
-  });
+  let matches = candidates.filter(candidate =>
+    String(extractCandidateEpisodeNo(candidate)) === String(focus.episodeNo)
+  );
   if (!matches.length) return null;
 
   if (focus.dateToken) {
@@ -653,6 +660,7 @@ async function persistLastSelectMap(globals) {
 function setPreferForKey(globals, key, animeId, source) {
   const value = globals.lastSelectMap.get(key);
   if (!value?.animeIds?.some(id => String(id) === String(animeId))) return false;
+  if (value.explicitBySeason?.default === true) return false;
 
   value.preferBySeason = value.preferBySeason || {};
   value.sourceBySeason = value.sourceBySeason || {};
@@ -675,6 +683,15 @@ async function rememberFongmiAiCandidate(globals, name, matchedKeyword, candidat
   const animeId = getCandidateAnimeId(candidate);
   const source = getCandidateSource(candidate);
   if (!animeId) return;
+
+  const preferenceKeys = [...new Set([name, matchedKeyword].filter(Boolean))];
+  const hasExplicitManualPreference = preferenceKeys.some(key =>
+    globals.lastSelectMap.get(key)?.explicitBySeason?.default === true
+  );
+  if (hasExplicitManualPreference) {
+    log("info", `[Fongmi][AI] skipped remembering candidate because manual preference is explicit: keys=${preferenceKeys.join("|")}`);
+    return;
+  }
 
   const updatedKey = rememberPreferAnimeId(globals, name, matchedKeyword, animeId, source);
   if (!updatedKey) {
