@@ -268,7 +268,29 @@ function shouldSkipPreferredFallback(episode) {
   return Boolean(focus?.episodeNo);
 }
 
-function findPreferredCandidate(name, matchedKeyword, episode, candidates) {
+// 手动确认的作品限定自动匹配范围，避免分集筛选失败后跨季兜底。
+function narrowManualWorkCandidates(globals, name, matchedKeyword, episode, candidates) {
+  const keys = [...new Set([name, matchedKeyword].filter(Boolean))];
+  for (const key of keys) {
+    if (globals.lastSelectMap.get(key)?.explicitBySeason?.default !== true) continue;
+    const [animeId, source] = getPreferAnimeId(key);
+    if (!animeId) continue;
+
+    const focus = buildFongmiAiFocus(episode);
+    const matches = candidates.filter(candidate => {
+      const animeMatches = String(getCandidateAnimeId(candidate)) === String(animeId) ||
+        String(candidate?.anime?.bangumiId ?? "") === String(animeId);
+      if (!animeMatches || (source && String(getCandidateSource(candidate)) !== String(source))) return false;
+      return !focus.episodeNo || String(extractCandidateEpisodeNo(candidate)) === String(focus.episodeNo);
+    });
+    candidates.splice(0, candidates.length, ...matches);
+    log("info", `[Fongmi][Prefer] narrowed by manual selection: key=${key}, animeId=${animeId}, source=${source || ""}, candidates=${matches.length}`);
+    return true;
+  }
+  return false;
+}
+
+function findPreferredCandidate(name, matchedKeyword, episode, candidates, allowFallback = true) {
   const keys = [...new Set([name, matchedKeyword].filter(Boolean))];
 
   for (const key of keys) {
@@ -303,7 +325,7 @@ function findPreferredCandidate(name, matchedKeyword, episode, candidates) {
       return titleOverlapCandidate;
     }
 
-    if (shouldSkipPreferredFallback(episode)) {
+    if (!allowFallback || shouldSkipPreferredFallback(episode)) {
       log("info", `[Fongmi][Prefer] skipped fallback by lastSelectMap: key=${key}, animeId=${preferAnimeId}, source=${preferSource || ""}`);
       return null;
     }
@@ -350,7 +372,7 @@ function extractDateToken(value) {
 }
 
 function extractEpisodePartToken(value) {
-  const match = String(value || "").match(/第\s*\d{1,4}\s*[集期话]\s*(?:[-_./|｜]\s*)?(?:[（(【\[]\s*)?([上中下])(?:\s*[）)】\]])?(?=\s*(?:$|[\s_.\-:：,，.。;；、]))/);
+  const match = String(value || "").match(/第\s*\d{1,4}\s*[集期话]\s*(?:[-_./|｜]\s*)?(?:[（(【\[]\s*)?([上中下])(?:\s*[）)】\]])?(?:\s*[（(【\[]\s*[一二三四五六七八九十\d]+\s*[）)】\]])?(?=\s*(?:$|[\s_.\-:：,，.。;；、]))/);
   return match ? match[1] : "";
 }
 
@@ -735,10 +757,11 @@ async function askFongmiAi(globals, payload, stage = "selectCandidate") {
 export async function selectFongmiCandidateByAi(globals, name, episode, candidates, matchedKeyword = name) {
   if (!candidates.length) return null;
 
+  const manualWork = narrowManualWorkCandidates(globals, name, matchedKeyword, episode, candidates);
   if (narrowExplicitPartCandidates(episode, candidates)) return null;
   if (!candidates.length) return null;
 
-  const preferredCandidate = findPreferredCandidate(name, matchedKeyword, episode, candidates);
+  const preferredCandidate = findPreferredCandidate(name, matchedKeyword, episode, candidates, !manualWork);
   if (preferredCandidate) {
     keepOnlyCandidate(candidates, preferredCandidate);
     return preferredCandidate;
@@ -754,10 +777,11 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
   }
 
   if (!globals.aiValid || !globals.aiApiKey) {
-    keepOnlyTopCandidate(candidates);
+    if (manualWork) candidates.splice(0, candidates.length);
+    else keepOnlyTopCandidate(candidates);
     return null;
   }
-  if (!shouldUseFongmiAi(candidates)) {
+  if (!manualWork && !shouldUseFongmiAi(candidates)) {
     log("info", `[Fongmi][AI] skipped: local score is confident for ${candidates[0].anime?.animeTitle || ""}`);
     keepOnlyTopCandidate(candidates);
     return null;
@@ -765,6 +789,7 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
 
   const groups = buildCandidateGroups(candidates);
   const focus = buildFongmiAiFocus(episode);
+  const aiName = globals.lastSelectMap.get(name)?.fongmiCorrectedTitle || name;
 
   try {
     let aiCandidates = candidates;
@@ -773,7 +798,7 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
     if (candidates.length <= FONGMI_AI_COMPACT_LIMIT) {
       payload = {
         mode: "selectCandidate",
-        name,
+        name: aiName,
         episodeRaw: episode,
         groups: groups.map(group => buildFocusedGroupPayload(group, focus))
       };
@@ -782,14 +807,14 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
         aiCandidates = groups[0].candidates;
         payload = {
           mode: "selectCandidate",
-          name,
+          name: aiName,
           episodeRaw: episode,
           groups: [buildFocusedGroupPayload(groups[0], focus)]
         };
       } else {
         const groupResponse = await askFongmiAi(globals, {
           mode: "selectGroup",
-          name,
+          name: aiName,
           episodeRaw: episode,
           groups: groups.map(group => buildGroupPayload(group, { includeEpisodes: false }))
         }, "selectGroup");
@@ -799,14 +824,14 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
           if (groupId !== null && groupId !== undefined) {
             log("warn", `[Fongmi][AI] Invalid groupId: ${groupId}`);
           }
-          keepOnlyTopCandidate(candidates);
+          candidates.splice(0, candidates.length);
           return null;
         }
 
         aiCandidates = selectedGroup.candidates;
         payload = {
           mode: "selectCandidate",
-          name,
+          name: aiName,
           episodeRaw: episode,
           groups: [buildFocusedGroupPayload(selectedGroup, focus)]
         };
@@ -816,7 +841,8 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
     const parsedResponse = await askFongmiAi(globals, payload, payload.mode);
     const selectedCandidate = findCandidateByAiResponse(parsedResponse, aiCandidates);
     if (!selectedCandidate) {
-      keepOnlyTopCandidate(candidates);
+      candidates.splice(0, candidates.length);
+      log("info", "[Fongmi][AI] no matching candidate; automatic selection stopped");
       return null;
     }
 
@@ -825,7 +851,7 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
     return selectedCandidate;
   } catch (error) {
     log("error", `[Fongmi][AI] matching failed: ${error.message}`);
-    keepOnlyTopCandidate(candidates);
+    candidates.splice(0, candidates.length);
     return null;
   }
 }

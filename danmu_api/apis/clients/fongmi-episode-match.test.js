@@ -3,6 +3,10 @@ import test from "node:test";
 
 import { Globals } from "../../configs/globals.js";
 import { selectFongmiCandidateByAi } from "./fongmi-ai-match.js";
+import { getFongmiDanmaku } from "./fongmi-api.js";
+import { handleFongmiManualCorrection } from "./fongmi-manual-correction.js";
+import { rememberFongmiCommentPreference } from "./fongmi-prefer.js";
+import { getLastSearch, setSearchCache } from "../../utils/cache-util.js";
 
 const RAW_EPISODE = "谁养谁亲密关系的背后.mp4【圆桌派 第3季.全24集】";
 
@@ -265,4 +269,147 @@ test("FongMi preferred anime should use episodeNumber when title has a suffix nu
   assert.equal(selected?.episode?.episodeId, "30173");
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].anime.animeId, preferredAnime.animeId);
+});
+
+const MENGTAN_NAME = "https://pan.quark.cn/s/4ce098443535";
+const MENGTAN_EPISODE = "[1.3GB]第13期下 萌探家族拯救朱朝阳.mp4【萌探探探案/萌探1】";
+const MENGTAN_FIRST = { animeId: 8895950, bangumiId: "23l8oul8zos", animeTitle: "萌探探探案第1季(2021)【综艺】from iqiyi", source: "iqiyi" };
+const MENGTAN_SECOND = { animeId: 8256680, bangumiId: "249m6jnptgg", animeTitle: "萌探探探案第2季(2022)【综艺】from iqiyi", source: "iqiyi" };
+
+function resetMatchConfig() {
+  Globals.init({});
+  const globals = Globals.getConfig();
+  globals.aiValid = false;
+  globals.aiApiKey = "";
+  globals.localCacheValid = globals.redisValid = globals.localRedisValid = false;
+  globals.lastSelectMap.clear();
+  globals.searchCache.clear();
+  globals.favoriteCache.clear();
+  globals.animes = [];
+  globals.sourceOrderArr = ["iqiyi"];
+  globals.enableAnimeEpisodeFilter = false;
+  return globals;
+}
+
+function mengtanCandidates() {
+  return [
+    { anime: MENGTAN_SECOND, episode: { episodeId: 30618, episodeTitle: "【qiyi】 第13期下(一) 那英华晨宇成团竞演 第13期下 那英华晨宇成团竞演 baby马丽被虐哭" }, score: 7200 },
+    { anime: MENGTAN_FIRST, episode: { episodeId: 30487, episodeTitle: "【qiyi】 第13期下(一) 萌探家族拯救朱朝阳 杨紫化身夏雪爷青回 萌探家族暖心拯救朱朝阳" }, score: 7100 },
+    { anime: MENGTAN_FIRST, episode: { episodeId: 30488, episodeTitle: "【qiyi】 第13期下(二) 杨紫看老年夏东海泪崩 杨紫化身夏雪爷青回 萌探家族暖心拯救朱朝阳" }, score: 7099 }
+  ];
+}
+
+async function rememberMengtan() {
+  const req = new Request("https://test.invalid/api/v2/fongmi/manual-correction", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ originalName: MENGTAN_NAME, searchName: "萌探探探案", animeId: MENGTAN_FIRST.animeId, source: "iqiyi", episodeId: 30487 })
+  });
+  assert.equal((await (await handleFongmiManualCorrection(req)).json()).remembered, true);
+}
+
+test("FongMi should reuse the manually confirmed first season from the reported log", async () => {
+  const globals = resetMatchConfig();
+  await rememberMengtan();
+  // The original playback key takes precedence over a later generic-title preference.
+  globals.lastSelectMap.get("萌探探探案").preferBySeason.default = MENGTAN_SECOND.animeId;
+  const candidates = mengtanCandidates();
+  const selected = await selectFongmiCandidateByAi(globals, MENGTAN_NAME, MENGTAN_EPISODE, candidates, "萌探探探案");
+  assert.equal(selected?.episode.episodeId, 30487);
+  assert.deepEqual(candidates, [selected]);
+  assert.equal(globals.lastSelectMap.get(MENGTAN_NAME).preferBySeason.default, String(MENGTAN_FIRST.animeId));
+});
+
+test("FongMi should recognize part labels followed by split numbers", async () => {
+  const globals = resetMatchConfig();
+  for (const suffix of ["(一)", "（二）", "(1)", "（2）"]) {
+    const candidate = { anime: MENGTAN_FIRST, episode: { episodeId: 30487, episodeTitle: `【qiyi】 第13期下${suffix} 萌探家族拯救朱朝阳` } };
+    const candidates = [candidate];
+    await selectFongmiCandidateByAi(globals, "萌探探探案", MENGTAN_EPISODE, candidates);
+    assert.deepEqual(candidates, [candidate], suffix);
+  }
+});
+
+test("FongMi should not substitute another season or episode for a manual selection", async () => {
+  const globals = resetMatchConfig();
+  await rememberMengtan();
+  for (const candidates of [
+    [mengtanCandidates()[0]],
+    [{ anime: MENGTAN_FIRST, episode: { episodeId: 30000, episodeTitle: "【qiyi】 第12期下 萌探家族拯救朱朝阳" } }],
+    [{ anime: MENGTAN_FIRST, episode: { episodeId: 30001, episodeTitle: "【qiyi】 第13期上 萌探家族拯救朱朝阳" } }]
+  ]) {
+    const selected = await selectFongmiCandidateByAi(globals, MENGTAN_NAME, MENGTAN_EPISODE, candidates, "萌探探探案");
+    assert.equal(selected, null);
+    assert.deepEqual(candidates, []);
+  }
+});
+
+test("FongMi should stop when AI declines a candidate", async t => {
+  const globals = resetMatchConfig();
+  globals.aiValid = true;
+  globals.aiApiKey = "test-key";
+  globals.aiBaseUrl = "https://ai.invalid";
+  globals.aiModel = "test-model";
+  const fetch = t.mock.method(globalThis, "fetch", async () => Response.json({ choices: [{ message: { content: '{"candidateId":null}' } }] }));
+  const candidates = mengtanCandidates().slice(0, 2);
+  const selected = await selectFongmiCandidateByAi(globals, "萌探探探案", "第13期下 未知专题.mp4", candidates);
+  assert.equal(fetch.mock.callCount(), 1);
+  assert.equal(selected, null);
+  assert.deepEqual(candidates, []);
+});
+
+test("FongMi should send the corrected title and stop on AI failure within a manual work", async t => {
+  const globals = resetMatchConfig();
+  await rememberMengtan();
+  globals.aiValid = true;
+  globals.aiApiKey = "test-key";
+  globals.aiBaseUrl = "https://ai.invalid";
+  globals.aiModel = "test-model";
+  let payload;
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    payload = JSON.parse(JSON.parse(options.body).messages[1].content);
+    return Response.json({ error: { message: "test failure" } }, { status: 503 });
+  });
+  const candidates = mengtanCandidates().slice(1);
+  const selected = await selectFongmiCandidateByAi(globals, MENGTAN_NAME, "第13期下 未知专题.mp4", candidates, "萌探探探案");
+  assert.equal(payload.name, "萌探探探案");
+  assert.equal(payload.groups.length, 1);
+  assert.equal(payload.groups[0].animeTitle, MENGTAN_FIRST.animeTitle);
+  assert.equal(selected, null);
+  assert.deepEqual(candidates, []);
+});
+
+test("FongMi automatic loading should record the final episode without overwriting manual preference", async t => {
+  const globals = resetMatchConfig();
+  await rememberMengtan();
+  const candidates = mengtanCandidates();
+  const details = [MENGTAN_FIRST, MENGTAN_SECOND].map(anime => ({
+    ...anime,
+    links: candidates.filter(candidate => candidate.anime === anime).map(candidate => ({ id: candidate.episode.episodeId, title: candidate.episode.episodeTitle, url: `https://test.invalid/video/${candidate.episode.episodeId}` }))
+  }));
+  globals.animes = details;
+  setSearchCache("萌探探探案::fongmi-source:iqiyi", [MENGTAN_SECOND, MENGTAN_FIRST], new Map(details.map(anime => [anime.bangumiId, anime])));
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("cached matching must not use the network"); });
+  const url = new URL("https://test.invalid/api/v2/fongmi/danmaku");
+  url.searchParams.set("name", MENGTAN_NAME);
+  url.searchParams.set("episode", MENGTAN_EPISODE);
+  const items = await (await getFongmiDanmaku(url, new Request(url), "test-ip")).json();
+  assert.equal(items.length, 1);
+  assert.match(items[0].url, /\/comment\/30487\?format=xml$/);
+  assert.equal(getLastSearch("test-ip").episodeId, 30487);
+  const before = JSON.stringify([...globals.lastSelectMap]);
+  rememberFongmiCommentPreference(30487, MENGTAN_FIRST.animeTitle, "test-ip");
+  assert.equal(JSON.stringify([...globals.lastSelectMap]), before);
+});
+
+
+test("FongMi should not guess within a manual work when AI is unavailable", async () => {
+  const globals = resetMatchConfig();
+  await rememberMengtan();
+  for (const episode of ["第13期下 未知专题.mp4", "未知专题.mp4"]) {
+    const candidates = mengtanCandidates().slice(1);
+    const selected = await selectFongmiCandidateByAi(globals, MENGTAN_NAME, episode, candidates, "萌探探探案");
+    assert.equal(selected, null);
+    assert.deepEqual(candidates, []);
+  }
 });

@@ -460,13 +460,14 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
       score: scoreFongmiEpisodeMatch(item.anime, item.episode, episode, item.index)
     }))
     .sort((a, b) => b.score - a.score);
-  rememberFongmiSearchContext(clientIp, matchedKeyword, candidates[0]);
-
   const selectedCandidate = await selectFongmiCandidateByAi(globals, name, episode, candidates, matchedKeyword);
   if (selectedCandidate) {
     candidates = [selectedCandidate, ...candidates.filter(candidate => candidate !== selectedCandidate)];
     log("info", `[Fongmi] selected: ${selectedCandidate.anime.animeTitle} - ${selectedCandidate.episode.episodeTitle}`);
   }
+
+  // 记录最终自动返回的分集，避免加载它时被误判成手动改选。
+  rememberFongmiSearchContext(clientIp, matchedKeyword, candidates[0]);
 
   const seen = new Set();
   const items = [];
