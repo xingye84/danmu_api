@@ -8,6 +8,7 @@ import { selectFongmiCandidateByAi } from "./fongmi-ai-match.js";
 import { rememberFongmiSearchContext } from "./fongmi-prefer.js";
 import { getFongmiCorrectedTitle } from "./fongmi-manual-correction.js";
 import { buildFongmiCompactSeasonKeywords, searchFongmiAnimeBySourcePreference as searchAnime } from "./fongmi-source-preference.js";
+import { prepareIqiyiFongmiEpisodes } from "../../utils/iqiyi-concat-util.js";
 
 // =====================
 // FongMi 弹幕接口适配
@@ -359,7 +360,7 @@ function scoreFongmiEpisodeMatch(anime, episode, targetEpisode, index) {
  * @param {string} apiBase 基础地址
  * @returns {Array} 候选分集数组
  */
-function buildFongmiDanmakuItems(animes, detailStore, apiBase) {
+function buildFongmiDanmakuItems(animes, detailStore, apiBase, rawEpisode) {
   const candidates = [];
 
   for (const anime of animes) {
@@ -370,10 +371,13 @@ function buildFongmiDanmakuItems(animes, detailStore, apiBase) {
     if (globals.enableAnimeEpisodeFilter) {
       episodes = episodes.filter(item => !globals.episodeTitleFilter.test(item.episodeTitle));
     }
+    if (anime.source === "iqiyi") episodes = prepareIqiyiFongmiEpisodes(episodes, rawEpisode);
     episodes = filterSameEpisodeTitle(episodes);
 
     episodes.forEach((episode, index) => {
-      const commentUrl = `${apiBase}/api/v2/comment/${encodeURIComponent(episode.episodeId)}?format=xml`;
+      const commentUrl = episode.iqiyiConcatUrl
+        ? `${apiBase}/api/v2/comment?url=${encodeURIComponent(episode.iqiyiConcatUrl)}&format=xml`
+        : `${apiBase}/api/v2/comment/${encodeURIComponent(episode.episodeId)}?format=xml`;
       candidates.push({
         anime,
         episode,
@@ -454,7 +458,7 @@ export async function getFongmiDanmaku(url, req, clientIp = null) {
   }
 
   const apiBase = buildFongmiApiBase(req);
-  let candidates = buildFongmiDanmakuItems(animes, detailStore, apiBase)
+  let candidates = buildFongmiDanmakuItems(animes, detailStore, apiBase, episode)
     .map(item => ({
       ...item,
       score: scoreFongmiEpisodeMatch(item.anime, item.episode, episode, item.index)

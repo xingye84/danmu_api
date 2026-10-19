@@ -2765,6 +2765,10 @@ export async function getCommentByUrl(videoUrl, queryFormat, segmentFlag, includ
     }
 
     videoUrl = videoUrl.trim();
+    if (videoUrl.startsWith('iqiyi-concat:')) {
+      const { getIqiyiConcatComment } = await import('./clients/iqiyi-concat-api.js');
+      return getIqiyiConcatComment(videoUrl, iqiyiSource, queryFormat, segmentFlag, includeDuration);
+    }
     if (videoUrl.startsWith('local:')) {
       const key = videoUrl.slice(6);
       if (segmentFlag) return jsonResponse(await localSource.getComments(key, 'local', true));
