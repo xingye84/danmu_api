@@ -17,6 +17,15 @@ export function mergeIqiyiEpisodeTitle(baseValue, subtitleValue, fallback = '未
   if (!base) return subtitle || fallback;
   if (!subtitle || base.includes(subtitle)) return base;
 
+  // 另一种常见返回方式是副标题从主标题开头重新开始：
+  //   主标题：第3期下 张一山郑业成现场结拜
+  //   副标题：第3期下 张一山郑业成现场结拜 华晨宇吞剑对抗沙溢
+  // 此时去掉副标题中的重复前缀，再保留新增文案。
+  if (subtitle.startsWith(base)) {
+    const remainder = subtitle.slice(base.length).trim();
+    return remainder ? `${base} ${remainder}` : base;
+  }
+
   const maxOverlap = Math.min(base.length, subtitle.length);
   // 两个字符以下的重叠过于常见，避免误删正常标题连接词。
   for (let length = maxOverlap; length >= 2; length -= 1) {
