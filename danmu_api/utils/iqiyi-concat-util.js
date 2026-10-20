@@ -3,6 +3,7 @@ export const IQIYI_CONCAT_PREFIX = 'iqiyi-concat:';
 const PART_PATTERN = /第\s*(\d{1,4})\s*期\s*([上中下])\s*[（(]\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*[）)]/;
 const SPLIT_RE = new RegExp(`^(?:【[^】]+】\\s*)?${PART_PATTERN.source}(?=\\s|$|[：:，,。.!！?？、])`);
 const SPECIAL_RE = /纯享|加更|花絮|未播|番外|预告|先导|会员版/;
+const IQIYI_TITLE_RE = /^【(?:qiyi|iqiyi)】/i;
 
 function partNumber(value) {
   if (/^\d+$/.test(value)) return Number(value);
@@ -91,4 +92,31 @@ export function prepareIqiyiFongmiEpisodes(episodes, rawEpisode = '') {
   }
   return normalized.flatMap(episode => replacements.has(episode)
     ? [replacements.get(episode)] : consumed.has(episode) ? [] : [episode]);
+}
+
+// 手动选集专用：在原始单段之外追加可选的合并项，不改变自动匹配的候选列表。
+export function buildIqiyiManualMergeEpisodes(episodes) {
+  return prepareIqiyiFongmiEpisodes(episodes)
+    .filter(episode => episode.iqiyiConcatUrl && IQIYI_TITLE_RE.test(String(episode.episodeTitle || '').trim()))
+    .map(episode => ({
+      ...episode,
+      episodeTitle: `${episode.episodeTitle}（合并分段）`,
+      // 复用 BangumiEpisode 已有的 url 字段，避免扩展通用数据模型。
+      url: episode.iqiyiConcatUrl
+    }));
+}
+
+// 详情接口兼容层：只给手动选集响应追加合并项，不污染自动搜索候选。
+export function appendIqiyiManualMerge(data) {
+  const episodes = data?.bangumi?.episodes;
+  if (!data?.success || !Array.isArray(episodes)) return data;
+  const merged = buildIqiyiManualMergeEpisodes(episodes);
+  if (!merged.length) return data;
+  return {
+    ...data,
+    bangumi: {
+      ...data.bangumi,
+      episodes: episodes.concat(merged)
+    }
+  };
 }

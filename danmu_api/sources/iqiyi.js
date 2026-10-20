@@ -7,6 +7,8 @@ import { generateValidStartDate } from "../utils/time-util.js";
 import { addAnime, removeEarliestAnime } from "../utils/cache-util.js";
 import { globals } from '../configs/globals.js';
 import { SegmentListResponse } from '../models/dandan-model.js';
+import { buildIqiyiEpisodeTitle, hasIqiyiEpisodeNumber } from '../utils/iqiyi-title-util.js';
+import { markIqiyiSegmentFailure } from '../utils/iqiyi-segment-util.js';
 
 // =====================
 // 获取爱奇艺弹幕
@@ -552,12 +554,7 @@ export default class IqiyiSource extends BaseSource {
    * @returns {string} 分集标题
    */
   _buildEpisodeTitle(epData) {
-    let title = epData.short_display_name || epData.title || "未知分集";
-    const subtitle = epData.subtitle;
-    if (subtitle && !title.includes(subtitle)) {
-      title = `${title} ${subtitle}`;
-    }
-    return title;
+    return buildIqiyiEpisodeTitle(epData);
   }
 
   /**
@@ -568,7 +565,7 @@ export default class IqiyiSource extends BaseSource {
    * @returns {string} 含集数的分集标题
    */
   _ensureEpisodeNumber(title, animeTitle, order) {
-    if (extractEpisodeNumberFromTitle(title) !== null) return title;
+    if (extractEpisodeNumberFromTitle(title) !== null || hasIqiyiEpisodeNumber(title)) return title;
     // 缺少分集序号时无法补全，保持标题原样
     if (order === undefined || order === null || order === "") return title;
     // 作品名去掉年份与类型后缀后再与分集标题比对，避免拼接出来的名字对不上
@@ -1074,6 +1071,7 @@ export default class IqiyiSource extends BaseSource {
 
       return this._parseIqiyiProtoDanmu(payload);
     } catch (error) {
+      markIqiyiSegmentFailure(segment);
       log("error", "[iqiyi] 请求分片弹幕失败:", error);
       return []; // 返回空数组而不是抛出错误，保持与getEpisodeDanmu一致的行为
     }

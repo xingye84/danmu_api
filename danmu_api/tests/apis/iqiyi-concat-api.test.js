@@ -4,7 +4,8 @@ import { Globals } from '../../configs/globals.js';
 import { prepareIqiyiFongmiEpisodes, decodeIqiyiConcat, IQIYI_CONCAT_PREFIX } from '../../utils/iqiyi-concat-util.js';
 import { getIqiyiConcatComment } from '../../apis/clients/iqiyi-concat-api.js';
 import { getFongmiDanmaku } from '../../apis/clients/fongmi-api.js';
-import { getCommentByUrl, filterSameEpisodeTitle } from '../../apis/dandan-api.js';
+import { getBangumi, getCommentByUrl, filterSameEpisodeTitle } from '../../apis/dandan-api.js';
+import { getManualBangumi } from '../../apis/iqiyi-manual-bangumi-api.js';
 import { getCommentCache, setSearchCache } from '../../utils/cache-util.js';
 import { getSourceByKey } from '../../sources/registry.js';
 import { handleFongmiManualCorrection } from '../../apis/clients/fongmi-manual-correction.js';
@@ -202,6 +203,37 @@ test('iqiyi combines continuous parts one through four, but not missing or dupli
   assert.deepEqual(prepareIqiyiFongmiEpisodes(episodes, '第03期上(五).mp4'), []);
 });
 
+test('iqiyi bangumi details expose a manual merge item while preserving single parts', async () => {
+  const globals = resetConfig();
+  const anime = {
+    animeId: 8256680, bangumiId: '249m6jnptgg',
+    animeTitle: '萌探探探案第2季(2022)【综艺】from iqiyi', source: 'iqiyi',
+    links: fourParts().map(e => ({ id: e.episodeId, title: e.episodeTitle, url: e.url }))
+  };
+  globals.animes = [anime];
+  const data = await (await getManualBangumi('/api/v2/bangumi/8256680')).json();
+  const episodes = data.bangumi.episodes;
+  assert.equal(episodes.filter(e => /\(一\)|（一）/.test(e.episodeTitle)).length, 1);
+  const merged = episodes.find(e => e.episodeTitle.includes('合并分段'));
+  assert.ok(merged);
+  assert.ok(merged.url.startsWith(IQIYI_CONCAT_PREFIX));
+  assert.deepEqual(decodeIqiyiConcat(merged.url), fourParts().map(e => e.url));
+  const automatic = await (await getBangumi('/api/v2/bangumi/8256680')).json();
+  assert.equal(automatic.bangumi.episodes.some(e => e.episodeTitle.includes('合并分段')), false);
+});
+
+test('iqiyi manual merge does not add virtual items to non-iqiyi titles', async () => {
+  const globals = resetConfig();
+  const anime = {
+    animeId: 8256680, bangumiId: '249m6jnptgg',
+    animeTitle: '其它来源番剧', source: 'tencent',
+    links: fourParts().map(e => ({ id: e.episodeId, title: e.episodeTitle.replace('【qiyi】', '【qq】'), url: e.url }))
+  };
+  globals.animes = [anime];
+  const data = await (await getManualBangumi('/api/v2/bangumi/8256680')).json();
+  assert.equal(data.bangumi.episodes.some(e => e.episodeTitle.includes('合并分段')), false);
+});
+
 test('FongMi exact part playback chooses the right single video without AI, including parts three and four', async t => {
   const globals = resetConfig();
   const anime = { animeId: 8256680, bangumiId: '249m6jnptgg', animeTitle: '萌探探探案第2季(2022)【综艺】from iqiyi', source: 'iqiyi' };
@@ -238,7 +270,7 @@ test('four-part timeline uses the sum of all preceding true durations', async ()
   assert.equal(metadataCalls, 4, 'each video metadata is fetched only once');
 });
 
-test('a failed third part still returns and caches the first two parts', async () => {
+test('a failed third part still returns the first two parts without caching the partial result', async () => {
   resetConfig();
   const episodes = fourParts().slice(0, 3);
   const address = prepareIqiyiFongmiEpisodes(episodes, RAW)[0].iqiyiConcatUrl;
@@ -255,7 +287,9 @@ test('a failed third part still returns and caches the first two parts', async (
   const data = await response.json();
   assert.deepEqual(data.comments.map(c => c.m), episodes.slice(0, 2).map(e => e.url));
   assert.deepEqual(data.comments.map(c => Number(c.p.split(',')[0])), [2, 102]);
-  assert.equal(getCommentCache(address).length, 2);
+  assert.equal(getCommentCache(address), null);
+  assert.equal(response.headers.get('X-Danmu-Partial'), '1');
+  assert.match(response.headers.get('Cache-Control') || '', /no-store/);
   assert.equal(data.videoDuration, 300);
 });
 
