@@ -13,17 +13,18 @@ function normalizeTitlePart(value) {
  */
 export function mergeIqiyiEpisodeTitle(baseValue, subtitleValue, fallback = '未知分集') {
   const base = normalizeTitlePart(baseValue);
-  const subtitle = normalizeTitlePart(subtitleValue);
+  let subtitle = normalizeTitlePart(subtitleValue);
   if (!base) return subtitle || fallback;
   if (!subtitle || base.includes(subtitle)) return base;
 
-  // 另一种常见返回方式是副标题从主标题开头重新开始：
-  //   主标题：第3期下 张一山郑业成现场结拜
-  //   副标题：第3期下 张一山郑业成现场结拜 华晨宇吞剑对抗沙溢
-  // 此时去掉副标题中的重复前缀，再保留新增文案。
-  if (subtitle.startsWith(base)) {
-    const remainder = subtitle.slice(base.length).trim();
-    return remainder ? `${base} ${remainder}` : base;
+  // 分段主标题含“(一)”，整期副标题不含，不能直接做字符串重叠比较。
+  // 只去掉副标题中同一期、同一上/中/下的整期前缀，保留主标题的分段编号。
+  const baseEpisode = base.match(/^第\s*(\d+)\s*期\s*([上中下]?)/);
+  const subtitleEpisode = subtitle.match(/^第\s*(\d+)\s*期\s*([上中下]?)(?=\s|$)/);
+  if (baseEpisode && subtitleEpisode && Number(baseEpisode[1]) === Number(subtitleEpisode[1]) &&
+      baseEpisode[2] === subtitleEpisode[2]) {
+    subtitle = subtitle.slice(subtitleEpisode[0].length).trim();
+    if (!subtitle || base.includes(subtitle)) return base;
   }
 
   const maxOverlap = Math.min(base.length, subtitle.length);
