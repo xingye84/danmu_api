@@ -24,6 +24,7 @@ import {
     handleCookieSave
 } from "./utils/cookie-util.js";
 import { ensureRemoteTitleMapping } from './utils/remote-title-mapping-util.js';
+import { buildOutboundResponse, buildOutboundWebResponse } from './utils/gzip-response-util.js';
 
 let globals;
 
@@ -830,6 +831,8 @@ function detectDeployPlatform(env) {
   return isRunningOnVercel() ? "vercel" : "cloudflare";
 }
 
+export const config = { maxDuration: 60 };
+
 // --- Cloudflare Workers 入口 ---
 export default {
   async fetch(request, env, ctx) {
@@ -839,6 +842,9 @@ export default {
     const response = await handleRequest(request, env, detectDeployPlatform(env), clientIp);
     // 边缘运行时在响应返回后延长生命周期，容纳可能在途的 Bangumi Data 后台静默下载
     extendBangumiDownloadLifecycle(ctx);
+    if (isRunningOnVercel()) {
+      return buildOutboundWebResponse(response, request.headers.get('accept-encoding'), { forceGzip: true });
+    }
     return response;
   },
 };
@@ -885,16 +891,12 @@ export async function netlifyHandler(event, context) {
   // 调用核心处理函数
   const response = await handleRequest(request, process.env, "netlify", clientIp);
 
-  // 转换为 Netlify 响应格式
-  const headers = {};
-  response.headers.forEach((value, key) => {
-    headers[key] = value;
-  });
-
+  const outbound = await buildOutboundResponse(response, event.headers?.['accept-encoding'] || event.headers?.['Accept-Encoding']);
   return {
-    statusCode: response.status,
-    headers,
-    body: await response.text(),
+    statusCode: outbound.status,
+    headers: outbound.headers,
+    body: outbound.isBase64Encoded ? outbound.body.toString('base64') : outbound.body.toString('utf8'),
+    isBase64Encoded: outbound.isBase64Encoded,
   };
 }
 

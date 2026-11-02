@@ -3,6 +3,7 @@ import { log } from './log-util.js'
 import { binResponse, jsonResponse, xmlResponse } from "./http-util.js";
 import { simplized, traditionalized } from './zh-util.js';
 import { convertDanAny } from './dan-any.js';
+import { convertDanmuToXml as convertDanmuToXmlFast } from './xml-danmu-util.js';
 
 // =====================
 // danmu处理相关函数
@@ -702,7 +703,7 @@ export function formatDanmuResponse(danmuData, queryFormat) {
   // 兼容旧格式转换
   if (format === 'xml') {
     try {
-      const xmlData = convertDanmuToXml(danmuData);
+      const xmlData = convertDanmuToXmlFast(danmuData);
       return xmlResponse(xmlData);
     } catch (error) {
       log("error", `[system] [danmu] Failed to convert to XML: ${error.message}`);

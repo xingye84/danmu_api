@@ -1148,6 +1148,7 @@ test('worker 平台适配层：netlifyHandler / vercelHandler 映射为标准响
   assert.strictEqual(netlifyOut.statusCode, 204);
   assert.strictEqual(netlifyOut.headers['access-control-allow-origin'], '*');
   assert.strictEqual(netlifyOut.body, '');
+  assert.strictEqual(netlifyOut.isBase64Encoded, false);
 
   const captured = { status: null, headers: {}, body: null };
   await vercelHandler(
