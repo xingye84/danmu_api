@@ -2,7 +2,8 @@
 export const IQIYI_CONCAT_PREFIX = 'iqiyi-concat:';
 const PART_PATTERN = /第\s*(\d{1,4})\s*期\s*([上中下])\s*[（(]\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*[）)]/;
 const SPLIT_RE = new RegExp(`^(?:【[^】]+】\\s*)?${PART_PATTERN.source}(?=\\s|$|[：:，,。.!！?？、])`);
-const SPECIAL_RE = /纯享|加更|花絮|未播|番外|预告|先导|会员版/;
+const SPECIAL_VERSION_PATTERN = '(?:纯享(?:版)?|加更(?:版)?|花絮(?:版)?|未播(?:版)?|番外(?:篇)?|预告(?:片)?|先导(?:片)?|会员版)';
+const SPECIAL_RE = new RegExp(`^${SPECIAL_VERSION_PATTERN}|(?:^|[\\s（(【\\[])${SPECIAL_VERSION_PATTERN}[）)】\\]]?$|[（(【\\[]\\s*${SPECIAL_VERSION_PATTERN}\\s*[）)】\\]]`);
 const IQIYI_TITLE_RE = /^【(?:qiyi|iqiyi)】/i;
 
 function partNumber(value) {
@@ -61,7 +62,10 @@ export function prepareIqiyiFongmiEpisodes(episodes, rawEpisode = '') {
   const groups = new Map();
   for (const episode of normalized) {
     const match = episode.episodeTitle.match(SPLIT_RE);
-    if (!match || SPECIAL_RE.test(episode.episodeTitle) || !isIqiyiUrl(episode.url)) continue;
+    if (!match || !isIqiyiUrl(episode.url)) continue;
+    // 只识别版本前缀、独立后缀或完整括号标记，剧情文案中的“爆笑番外”等不属于版本标记。
+    const versionTitle = episode.episodeTitle.slice(match[0].length).replace(/^[\s：:，,。.!！?？、（(【\[]+/, '');
+    if (SPECIAL_RE.test(versionTitle)) continue;
     const dateMatch = episode.episodeTitle.match(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
     const date = dateMatch ? `${dateMatch[1]}${dateMatch[2].padStart(2, '0')}${dateMatch[3].padStart(2, '0')}` : '';
     const key = `${Number(match[1])}:${match[2]}:${date}`;
@@ -94,7 +98,7 @@ export function prepareIqiyiFongmiEpisodes(episodes, rawEpisode = '') {
     ? [replacements.get(episode)] : consumed.has(episode) ? [] : [episode]);
 }
 
-// 手动选集专用：在原始单段之外追加可选的合并项，不改变自动匹配的候选列表。
+// 手动选集专用：在原始单段之外提供可选的合并项，不改变自动匹配的候选列表。
 export function buildIqiyiManualMergeEpisodes(episodes) {
   return prepareIqiyiFongmiEpisodes(episodes)
     .filter(episode => episode.iqiyiConcatUrl && IQIYI_TITLE_RE.test(String(episode.episodeTitle || '').trim()))
@@ -106,17 +110,24 @@ export function buildIqiyiManualMergeEpisodes(episodes) {
     }));
 }
 
-// 详情接口兼容层：只给手动选集响应追加合并项，不污染自动搜索候选。
+// 详情接口兼容层：只给手动选集响应插入合并项，不污染自动搜索候选。
 export function appendIqiyiManualMerge(data) {
   const episodes = data?.bangumi?.episodes;
   if (!data?.success || !Array.isArray(episodes)) return data;
   const merged = buildIqiyiManualMergeEpisodes(episodes);
   if (!merged.length) return data;
+  const lastIndexByUrl = new Map(episodes.map((episode, index) => [episode.url, index]));
+  const mergedByIndex = new Map();
+  for (const episode of merged) {
+    // 紧跟本组最后一个原始分段，保留上/下、不同期数及其它条目的原有顺序。
+    const index = Math.max(...decodeIqiyiConcat(episode.url).map(url => lastIndexByUrl.get(url)));
+    mergedByIndex.set(index, [...(mergedByIndex.get(index) || []), episode]);
+  }
   return {
     ...data,
     bangumi: {
       ...data.bangumi,
-      episodes: episodes.concat(merged)
+      episodes: episodes.flatMap((episode, index) => [episode, ...(mergedByIndex.get(index) || [])])
     }
   };
 }

@@ -1,5 +1,8 @@
 // language=JavaScript
+import { iqiyiManualCommentJsContent } from './iqiyi-manual-comment.js';
+
 export const apitestJsContent = /* javascript */ `
+${iqiyiManualCommentJsContent}
 // API 配置
 const apiConfigs = {
     searchAnime: {
@@ -69,6 +72,7 @@ let danmuTestState = {
     currentTitle: '',
     currentDuration: 0,
     currentSourceUrl: '',
+    currentIqiyiConcatUrl: '',
     currentSearchQuery: '',
     currentCallTrace: null,
     currentManualSearchCallTraceBase: null,
@@ -1462,6 +1466,7 @@ async function fetchDanmuForTest(episodeId, title, source, traceBase, sourceUrl)
     danmuTestState.currentTitle = title;
     danmuTestState.currentDuration = 0;
     danmuTestState.currentSourceUrl = getDanmuSourceUrl(sourceUrl);
+    danmuTestState.currentIqiyiConcatUrl = getIqiyiManualCommentAddress(source === 'manual' ? sourceUrl : '');
     danmuTestState.currentSearchQuery = '';
 
     // 隐藏上级面板
@@ -1477,8 +1482,8 @@ async function fetchDanmuForTest(episodeId, title, source, traceBase, sourceUrl)
     resultArea.style.display = 'block';
 
     const startTime = performance.now();
+    const commentUrl = buildIqiyiManualCommentUrl(episodeId, 'json', true, danmuTestState.currentIqiyiConcatUrl);
     try {
-        const commentUrl = '/api/v2/comment/' + episodeId + '?format=json&duration=true';
         const data = await fetch(buildApiUrl(commentUrl))
             .then(resp => {
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -1573,7 +1578,6 @@ async function fetchDanmuForTest(episodeId, title, source, traceBase, sourceUrl)
         setTimeout(() => resultArea.scrollIntoView({ behavior: 'smooth', block: 'start' }), 10);
     } catch (e) {
         if (!isCurrentDanmuRequest(requestId)) return;
-        const commentUrl = '/api/v2/comment/' + episodeId + '?format=json&duration=true';
         finishDanmuCallFailure(requestTrace, startTime, {
             name: '弹幕',
             method: 'GET',
@@ -1604,7 +1608,7 @@ async function exportDanmu() {
 
     addLog('导出弹幕 ' + format + '...', 'info');
     try {
-        const resp = await fetch(buildApiUrl('/api/v2/comment/' + id + '?format=' + encodeURIComponent(format)));
+        const resp = await fetch(buildApiUrl(buildIqiyiManualCommentUrl(id, format, false, danmuTestState.currentIqiyiConcatUrl)));
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
         const contentType = (resp.headers && resp.headers.get ? (resp.headers.get('content-type') || '') : '').toLowerCase();

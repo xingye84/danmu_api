@@ -60,3 +60,32 @@ test('iqiyi keeps subtitle episode labels that do not match the base', () => {
   assert.equal(buildTitle({ short_display_name: '第4期上(一) 文案', subtitle: '第5期上 另一文案' }),
     '第4期上(一) 文案 第5期上 另一文案');
 });
+
+test('iqiyi deduplicates the reported split subtitle without losing its additional text', () => {
+  assert.equal(buildTitle({
+    short_display_name: '第1期下(二) 娜扎孙千猛追宋小宝',
+    subtitle: '第1期下(二)谢娜被怀疑伤透了心 娜扎孙千猛追宋小宝'
+  }), '第1期下(二) 谢娜被怀疑伤透了心 娜扎孙千猛追宋小宝');
+});
+
+test('iqiyi keeps the main split label while deduplicating matching subtitle variants', () => {
+  for (const part of ['(二)', '（二）', '(2)', '（02）']) {
+    assert.equal(buildTitle({
+      short_display_name: `第01期下${part} 娜扎孙千猛追宋小宝`,
+      subtitle: `第1期下${part}谢娜被怀疑伤透了心 娜扎孙千猛追宋小宝`
+    }), `第01期下${part} 谢娜被怀疑伤透了心 娜扎孙千猛追宋小宝`);
+  }
+});
+
+test('iqiyi split subtitle dedup preserves distinct main text and unrelated labels', () => {
+  assert.equal(buildTitle({
+    short_display_name: '第1期下(二) 娜扎孙千猛追宋小宝',
+    subtitle: '第1期下(二)谢娜被怀疑伤透了心'
+  }), '第1期下(二) 娜扎孙千猛追宋小宝 谢娜被怀疑伤透了心');
+  for (const label of ['第1期下(一)', '第1期上(二)', '第2期下(二)']) {
+    assert.equal(buildTitle({
+      short_display_name: '第1期下(二) 娜扎孙千猛追宋小宝',
+      subtitle: `${label}谢娜被怀疑伤透了心 娜扎孙千猛追宋小宝`
+    }), `第1期下(二) 娜扎孙千猛追宋小宝 ${label}谢娜被怀疑伤透了心 娜扎孙千猛追宋小宝`);
+  }
+});
