@@ -13,6 +13,7 @@ import { resolveFavoriteForSearchKeyword } from "../utils/favorite-util.js";
 import { formatDanmuResponse, convertToDanmakuJson } from "../utils/danmu-util.js";
 import { resolveOffsetRule, applyOffset, stripLinkOffset, offsetDuration } from "../utils/offset-util.js";
 import { filterMappingQualifierCandidates, filterMappingTargetCandidates, resolveAutoMatchMapping } from "../utils/auto-match-mapping-util.js";
+import { ensureRemoteAutoMatchMapping, getEffectiveAutoMatchMappingRules } from "../utils/auto-match-mapping-url-util.js";
 import { 
   extractEpisodeTitle, convertChineseNumber, parseFileName, createDynamicPlatformOrder, normalizeTitleForMatch,
   extractYear, titleMatches, extractAnimeInfo, extractEpisodeNumberFromTitle, extractSeasonNumberFromAnimeTitle, extractAnimeTitle
@@ -23,7 +24,7 @@ import { getHanjutvSourceLabel } from "../utils/hanjutv-util.js";
 import { rememberFongmiCommentPreference } from "./clients/fongmi-prefer.js";
 import AIClient from '../utils/ai-util.js';
 import { getSourceByKey, getSourceMetaByKey, getLogNameByKey } from "../sources/registry.js";
-import { isHongguoPlayerUrl } from "../sources/hongguo.js";
+import { isHongguoPlayerUrl, isHongguoSeriesId } from "../sources/hongguo.js";
 import BilibiliSource from "../sources/bilibili.js"; // resolveB23Link 为 BilibiliSource 实例方法，单测中仍需直接 new
 import { Anime, AnimeMatch, Episodes, Bangumi } from "../models/dandan-model.js";
 
@@ -1151,7 +1152,7 @@ async function matchAniAndEpByAi(season, episode, year, searchData, title, req, 
     // userPrompt 只传入结构化数据
     const userPrompt = JSON.stringify(matchData, null, 2);
 
-    const aiResponse = await aiClient.ask(userPrompt);
+    const aiResponse = await aiClient.ask(userPrompt, { thinking: false });
     // const aiResponse = '{ "animeIndex": 0 }';
     log("info", `[system] [match] AI match response: ${aiResponse}`);
 
@@ -2024,7 +2025,8 @@ export async function matchAnime(url, req, clientIp) {
     const originalYear = parsed.year;
 
     const preferenceTitles = [...new Set([originalTitle, parsed.title].filter(Boolean))];
-    const configuredMapping = resolveAutoMatchMapping(globals.autoMatchMappingTable, {
+    await ensureRemoteAutoMatchMapping();
+    const configuredMapping = resolveAutoMatchMapping(getEffectiveAutoMatchMappingRules(), {
       title: originalTitle,
       season: originalSeason,
       episode: originalEpisode
@@ -2646,7 +2648,7 @@ export async function getComment(path, queryFormat, segmentFlag, clientIp, inclu
     danmus = await fetchMergedComments(url, animeTitle, commentId);
   } else {
     const commentUrl = cleanUrl;
-    const isHongguoUrl = isHongguoPlayerUrl(commentUrl);
+    const isHongguoUrl = isHongguoPlayerUrl(commentUrl) || isHongguoSeriesId(commentUrl);
 
     if (url.includes('.qq.com')) {
       danmus = await sourceLogContext.run('tencent', () => tencentSource.getComments(commentUrl, plat, segmentFlag));
