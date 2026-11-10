@@ -1,6 +1,6 @@
 // 爱奇艺综艺兼容层：仅供 FongMi 的完整期数文件使用，不扩展通用合并协议。
 export const IQIYI_CONCAT_PREFIX = 'iqiyi-concat:';
-const PART_PATTERN = /第\s*(\d{1,4})\s*期\s*([上中下])\s*[（(]\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*[）)]/;
+const PART_PATTERN = /第\s*(\d{1,4})\s*期\s*([上中下]?)\s*[（(]\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*[）)]/;
 const SPLIT_RE = new RegExp(`^(?:【[^】]+】\\s*)?${PART_PATTERN.source}(?=\\s|$|[：:，,。.!！?？、])`);
 const SPECIAL_VERSION_PATTERN = '(?:纯享(?:版)?|加更(?:版)?|花絮(?:版)?|未播(?:版)?|番外(?:篇)?|预告(?:片)?|先导(?:片)?|会员版)';
 const SPECIAL_RE = new RegExp(`^${SPECIAL_VERSION_PATTERN}|(?:^|[\\s（(【\\[])${SPECIAL_VERSION_PATTERN}[）)】\\]]?$|[（(【\\[]\\s*${SPECIAL_VERSION_PATTERN}\\s*[）)】\\]]`);
