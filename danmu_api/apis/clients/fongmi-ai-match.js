@@ -3,13 +3,17 @@ import { getPreferAnimeId, setPreferByAnimeId, writeCacheToFile } from "../../ut
 import { httpPost } from "../../utils/http-util.js";
 import { setRedisKey } from "../../utils/redis-util.js";
 import { setLocalRedisKey } from "../../utils/local-redis-util.js";
+import { convertChineseNumber } from "../../utils/common-util.js";
 
 const FONGMI_AI_STRONG_SCORE = 4000;
 const FONGMI_AI_SAFE_SCORE_GAP = 5000;
 const FONGMI_AI_COMPACT_LIMIT = 200;
 const FONGMI_AI_REGULAR_GROUP_MIN_SIZE = 3;
 const FONGMI_AI_REGULAR_GROUP_COVERAGE = 0.8;
-const FONGMI_AI_REGULAR_GROUP_UNSAFE_RE = /(?:第\s*\d+\s*期|[上下中](?:\s|$)|纯享|加更|花絮|先导|预告|番外|特别|彩蛋|会员|未播|直播|片段|舞台|合集|抢先|幕后)/;
+const FONGMI_SPECIAL_EPISODE_VERSION_RE = /纯享|加更|花絮|先导|预告|番外|特别|彩蛋|会员|未播|直播|片段|舞台|合集|抢先|幕后/;
+const FONGMI_AI_REGULAR_GROUP_UNSAFE_RE = new RegExp(`(?:第\\s*\\d+\\s*期|[上下中](?:\\s|$)|${FONGMI_SPECIAL_EPISODE_VERSION_RE.source})`);
+const FONGMI_FILE_METADATA_RE = /\b(?:2160p|1080p|720p|4k|web-?dl|web-?rip|blu-?ray|hdr|dv|x265|x264|h\.?265|h\.?264|60fps|aac|flac|dts)\b/gi;
+const FONGMI_EPISODE_LABEL_PAIRS = new Map([["[", "]"], ["【", "】"], ["(", ")"], ["（", "）"]]);
 const FONGMI_EPISODE_TITLE_STOP_TOKENS = new Set([
   "正片",
   "纯享",
@@ -156,34 +160,76 @@ function sameCandidateWork(a, b) {
   return String(aId ?? "") === String(bId ?? "") && String(aSource ?? "") === String(bSource ?? "");
 }
 
+// 按配对括号处理整个标签，避免内层年份或上下集括号提前截断外层标签。
+function replaceEpisodeLabels(value, replaceLabel) {
+  const text = String(value || "");
+  const closingBrackets = [];
+  let result = "";
+  let cursor = 0;
+  let labelStart = 0;
+  for (let index = 0; index < text.length; index++) {
+    const closingBracket = FONGMI_EPISODE_LABEL_PAIRS.get(text[index]);
+    if (closingBracket) {
+      if (!closingBrackets.length) labelStart = index;
+      closingBrackets.push(closingBracket);
+    } else if (closingBrackets.length && text[index] === closingBrackets[closingBrackets.length - 1]) {
+      closingBrackets.pop();
+      if (!closingBrackets.length) {
+        result += text.slice(cursor, labelStart) + replaceLabel(text.slice(labelStart, index + 1));
+        cursor = index + 1;
+      }
+    }
+  }
+  return result + text.slice(cursor);
+}
+
+// 作品更新进度、全集数量和合集范围不能参与当前分集的任何约束。
+function stripEpisodeCollectionMetadata(value) {
+  return replaceEpisodeLabels(value, label =>
+    /更新|全集|全\s*[零〇一二三四五六七八九十百\d]+\s*[集期话]|[集期话].*合集/.test(label) ? " " : label);
+}
+
 function extractEpisodeNoFromRawEpisode(episode) {
   let text = String(episode || "");
   if (!text) return null;
 
-  text = text
-    .replace(/\[[^\]]*\]/g, " ")
-    .replace(/[【（(][^】）)]*[】）)]/g, " ")
-    .replace(/\.(?:mp4|mkv|avi|rmvb|ts|flv|mov|m4v)\s*$/i, " ")
+  const bracketEpisodeNos = [];
+  text = replaceEpisodeLabels(text, label => {
+    const content = label.slice(1, -1).trim();
+    const parsed = extractExplicitEpisode(content);
+    if (parsed?.index === 0) {
+      const suffix = content.slice(parsed.text.length).replace(/[\s_.\/|｜\-（）()【】\[\]]/g, "");
+      // 只接受独立集号及上下集标签，不能把更新进度或合集范围当成当前分集。
+      if (!suffix || suffix === extractEpisodePartToken(content)) bracketEpisodeNos.push(parsed.value);
+    }
+    return " ";
+  })
     .replace(/["'“”‘’]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  text = stripEpisodeFileMetadata(text);
 
-  const patterns = [
-    /[Ss]\d{1,2}\s*[Ee](\d{1,4})/,
-    /第\s*(\d{1,4})\s*[集期话]/,
-    /[Ee][Pp]?\.?\s*(\d{1,4})/,
-    /(?:^|[^\d])(\d{1,4})(?=$|[^\d])/
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (!match) continue;
-
-    const value = parseInt(match[1], 10);
-    if (Number.isInteger(value) && value > 0 && value < 10000) return String(value);
+  const explicitEpisode = extractExplicitEpisode(text);
+  if (explicitEpisode) return explicitEpisode.value;
+  // 带日期时只接受显式集号，不能把 03.15 中的 03 当作第 3 期。
+  if (!extractFongmiEpisodeDate(episode)) {
+    // 存在明确括号集号时，正文中的年份不能抢占它；显式集号和普通数字正文仍优先。
+    const numberText = bracketEpisodeNos.length ? text.replace(/(?:^|[^\d])(?:19|20)\d{2}(?=$|[^\d])/g, " ") : text;
+    const match = numberText.match(/(?:^|[^\d])(\d{1,4})(?=$|[^\d])/);
+    const value = match ? Number(match[1]) : 0;
+    if (value > 0 && value < 10000) return String(value);
   }
+  // 文件名正文优先，独立括号集号只作补充。
+  return bracketEpisodeNos[0] ?? null;
+}
 
-  return null;
+function extractExplicitEpisode(value) {
+  const regularEpisodeNo = extractRegularEpisodeNo(value);
+  if (regularEpisodeNo) return regularEpisodeNo;
+
+  const match = String(value || "").match(/(?:S\d{1,2}\s*E|\bE(?:P|pisode)?\.?\s*)(\d{1,4})(?!\d)/i);
+  const episodeNo = match ? Number(match[1]) : 0;
+  return episodeNo > 0 ? { value: String(episodeNo), text: match[0], index: match.index } : null;
 }
 
 function extractCandidateEpisodeNo(candidate) {
@@ -194,8 +240,8 @@ function extractCandidateEpisodeNo(candidate) {
   return Number.isInteger(episodeNumber) && episodeNumber > 0 ? String(episodeNumber) : null;
 }
 
-function findRegularEpisodeCandidate(episode, candidates) {
-  const targetEpisodeNo = extractEpisodeNoFromRawEpisode(episode);
+function findRegularEpisodeCandidate(focus, candidates) {
+  const targetEpisodeNo = focus.episodeNo;
   if (!targetEpisodeNo) return null;
 
   const regularPayload = buildRegularGroupPayload({ candidates });
@@ -205,19 +251,13 @@ function findRegularEpisodeCandidate(episode, candidates) {
   return candidates.find(candidate => String(getCandidateId(candidate)) === String(match[0])) || null;
 }
 
-function findFocusedEpisodeCandidate(episode, candidates) {
-  const focus = buildFongmiAiFocus(episode);
+function findFocusedEpisodeCandidate(focus, candidates) {
   if (!focus?.episodeNo) return null;
 
   let matches = candidates.filter(candidate =>
     String(extractCandidateEpisodeNo(candidate)) === String(focus.episodeNo)
   );
   if (!matches.length) return null;
-
-  if (focus.dateToken) {
-    const dateMatches = matches.filter(candidate => extractDateToken(candidate?.episode?.episodeTitle || "") === focus.dateToken);
-    if (dateMatches.length) matches = dateMatches;
-  }
 
   if (focus.partToken) {
     const partMatches = matches.filter(candidate => extractEpisodePartToken(candidate?.episode?.episodeTitle || "") === focus.partToken);
@@ -227,31 +267,18 @@ function findFocusedEpisodeCandidate(episode, candidates) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-function narrowExplicitPartCandidates(episode, candidates) {
-  const focus = buildFongmiAiFocus(episode);
-  if (!focus?.episodeNo || !focus.partToken) return false;
+function narrowFocusedCandidates(focus, candidates, manualWork) {
+  const checkNumber = focus.episodeNo && (manualWork || focus.date || focus.partToken);
+  const checkPart = focus.partToken && (focus.episodeNo || focus.date);
+  if (!checkNumber && !checkPart) return false;
 
   const matches = candidates.filter(candidate => {
     const title = candidate?.episode?.episodeTitle || "";
-    const episodeNo = extractFocusedEpisodeNo(title);
-    const partToken = extractEpisodePartToken(title);
-    const dateToken = extractDateToken(title);
-
-    if (String(episodeNo) !== String(focus.episodeNo)) return false;
-    if (partToken !== focus.partToken) return false;
-    if (focus.dateToken && dateToken && dateToken !== focus.dateToken) return false;
-    return true;
+    return (!checkNumber || extractCandidateEpisodeNo(candidate) === focus.episodeNo) &&
+      (!checkPart || extractEpisodePartToken(title) === focus.partToken);
   });
-
-  if (matches.length) {
-    candidates.splice(0, candidates.length, ...matches);
-    log("info", `[Fongmi][AI] explicit part narrowed candidates: part=${focus.partToken}, candidates=${matches.length}`);
-    return false;
-  }
-
-  candidates.splice(0, candidates.length);
-  log("info", `[Fongmi][AI] explicit part has no exact candidate: part=${focus.partToken}, episode=${episode}`);
-  return true;
+  candidates.splice(0, candidates.length, ...matches);
+  return !matches.length;
 }
 
 function keepOnlyCandidate(candidates, candidate) {
@@ -263,81 +290,44 @@ function keepOnlyTopCandidate(candidates) {
   keepOnlyCandidate(candidates, candidates[0]);
 }
 
-function shouldSkipPreferredFallback(episode) {
-  const focus = buildFongmiAiFocus(episode);
-  return Boolean(focus?.episodeNo);
-}
-
-// 手动确认的作品限定自动匹配范围，避免分集筛选失败后跨季兜底。
-function narrowManualWorkCandidates(globals, name, matchedKeyword, episode, candidates) {
+// 日期和普通集号共用作品偏好；手动确认优先，且不能跨作品兜底。
+function findPreferredWork(globals, name, matchedKeyword, candidates) {
   const keys = [...new Set([name, matchedKeyword].filter(Boolean))];
-  for (const key of keys) {
-    if (globals.lastSelectMap.get(key)?.explicitBySeason?.default !== true) continue;
+  const manualKey = keys.find(key => globals.lastSelectMap.get(key)?.explicitBySeason?.default === true);
+  for (const key of manualKey ? [manualKey] : keys) {
     const [animeId, source] = getPreferAnimeId(key);
     if (!animeId) continue;
 
-    const focus = buildFongmiAiFocus(episode);
     const matches = candidates.filter(candidate => {
       const animeMatches = String(getCandidateAnimeId(candidate)) === String(animeId) ||
         String(candidate?.anime?.bangumiId ?? "") === String(animeId);
-      if (!animeMatches || (source && String(getCandidateSource(candidate)) !== String(source))) return false;
-      return !focus.episodeNo || String(extractCandidateEpisodeNo(candidate)) === String(focus.episodeNo);
+      return animeMatches && (!source || String(getCandidateSource(candidate)) === String(source));
     });
-    candidates.splice(0, candidates.length, ...matches);
-    log("info", `[Fongmi][Prefer] narrowed by manual selection: key=${key}, animeId=${animeId}, source=${source || ""}, candidates=${matches.length}`);
-    return true;
+    const explicit = globals.lastSelectMap.get(key)?.explicitBySeason?.default === true;
+    if (explicit || matches.length) return { key, candidates: matches, explicit };
   }
-  return false;
+  return null;
 }
 
-function findPreferredCandidate(name, matchedKeyword, episode, candidates, allowFallback = true) {
-  const keys = [...new Set([name, matchedKeyword].filter(Boolean))];
+function findPreferredCandidate(episode, focus, candidates, preferredWork) {
+  if (!preferredWork) return null;
+  const preferredCandidates = candidates.filter(candidate => preferredWork.candidates.includes(candidate));
+  if (!preferredCandidates.length) return null;
 
-  for (const key of keys) {
-    const [preferAnimeId, preferSource] = getPreferAnimeId(key);
-    if (!preferAnimeId) continue;
+  const focusedCandidate = findFocusedEpisodeCandidate(focus, preferredCandidates);
+  if (focusedCandidate) return focusedCandidate;
 
-    const preferredCandidates = candidates.filter(candidate => {
-      const candidateId = getCandidateAnimeId(candidate);
-      const candidateSource = getCandidateSource(candidate);
-      const animeMatches =
-        String(candidateId) === String(preferAnimeId) ||
-        String(candidate?.anime?.bangumiId ?? "") === String(preferAnimeId);
-      const sourceMatches = !preferSource || String(candidateSource) === String(preferSource);
-      return animeMatches && sourceMatches;
-    });
-    if (!preferredCandidates.length) continue;
+  const episodeCandidate = findRegularEpisodeCandidate(focus, preferredCandidates);
+  if (episodeCandidate) return episodeCandidate;
 
-    const focusedCandidate = findFocusedEpisodeCandidate(episode, preferredCandidates);
-    if (focusedCandidate) {
-      log("info", `[Fongmi][Prefer] selected focused episode by lastSelectMap: key=${key}, animeId=${preferAnimeId}, source=${preferSource || ""}, episode=${focusedCandidate.episode?.episodeTitle || ""}`);
-      return focusedCandidate;
-    }
+  const titleOverlapCandidate = findTitleOverlapCandidate(episode, preferredCandidates, focus);
+  if (titleOverlapCandidate) return titleOverlapCandidate;
 
-    const episodeCandidate = findRegularEpisodeCandidate(episode, preferredCandidates);
-    if (episodeCandidate) {
-      log("info", `[Fongmi][Prefer] selected episode by lastSelectMap: key=${key}, animeId=${preferAnimeId}, source=${preferSource || ""}, episode=${episodeCandidate.episode?.episodeTitle || ""}`);
-      return episodeCandidate;
-    }
-
-    const titleOverlapCandidate = findTitleOverlapCandidate(episode, preferredCandidates);
-    if (titleOverlapCandidate) {
-      return titleOverlapCandidate;
-    }
-
-    if (!allowFallback || shouldSkipPreferredFallback(episode)) {
-      log("info", `[Fongmi][Prefer] skipped fallback by lastSelectMap: key=${key}, animeId=${preferAnimeId}, source=${preferSource || ""}`);
-      return null;
-    }
-
-    const preferredCandidate = preferredCandidates[0];
-    if (preferredCandidate) {
-      log("info", `[Fongmi][Prefer] selected by lastSelectMap: key=${key}, animeId=${preferAnimeId}, source=${preferSource || ""}`);
-      return preferredCandidate;
-    }
+  if (preferredWork.explicit || focus.episodeNo) {
+    log("info", `[Fongmi][Prefer] skipped fallback by lastSelectMap: key=${preferredWork.key}`);
+    return null;
   }
-
-  return null;
+  return preferredCandidates[0];
 }
 
 function shouldUseFongmiAi(candidates) {
@@ -362,17 +352,39 @@ function normalizeCandidateTitle(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function extractDateToken(value) {
-  const match = String(value || "").match(/(20\d{2})[.\-/年](\d{1,2})[.\-/月](\d{1,2})/);
-  if (!match) return "";
+function stripEpisodeFileMetadata(value) {
+  return String(value || "")
+    .replace(/\b\d+(?:\.\d+)?\s*(?:[kmgt]i?b|[gm])\b/gi, " ")
+    .replace(/\b\d\.\d(?:\.\d)?\s*(?:声道|channels?\b|ch\b)/gi, " ")
+    .replace(/\b(?:aac|e-?ac-?3|ac-?3|dd(?:p|\+)?|dts(?:-hd)?|truehd)[\s._-]*\d\.\d(?:\.\d)?\b/gi, " ")
+    .replace(/\b\d\.\d(?:\.\d)?\s*(?:aac|e-?ac-?3|ac-?3|dd(?:p|\+)?|dts(?:-hd)?|truehd)(?!\w)/gi, " ")
+    .replace(FONGMI_FILE_METADATA_RE, " ")
+    .replace(/\.(?:mp4|mkv|avi|rmvb|ts|flv|mov|m4v)\s*$/i, " ");
+}
 
-  const month = String(parseInt(match[2], 10)).padStart(2, "0");
-  const day = String(parseInt(match[3], 10)).padStart(2, "0");
-  return `${match[1]}${month}${day}`;
+// 日期必须在标点清洗前提取，避免 03.15 被拆成两个普通集号。
+export function extractFongmiEpisodeDate(value) {
+  const text = stripEpisodeFileMetadata(stripEpisodeCollectionMetadata(value));
+  const full = text.match(/(?:^|[^\d])((?:19|20)\d{2})[.\-/年](\d{1,2})[.\-/月](\d{1,2})(?!\d)/)
+    || text.match(/(?:^|[^\d])((?:19|20)\d{2})(\d{2})(\d{2})(?!\d)/);
+  const short = !full && text.match(/(?:^|[^\dA-Za-z.\-/年])(\d{1,2})[.\-/月](\d{1,2})(?:日|号)?(?!\d|[集话章回])/);
+  if (!full && !short) return null;
+
+  const year = full ? Number(full[1]) : null;
+  const month = Number(full ? full[2] : short[1]);
+  const day = Number(full ? full[3] : short[2]);
+  const calendar = new Date(Date.UTC(year ?? 2000, month - 1, day));
+  if (calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) return null;
+  return { year, month, day };
+}
+
+function datesMatch(target, date) {
+  return Boolean(date && date.month === target.month && date.day === target.day &&
+    (target.year === null || date.year === null || date.year === target.year));
 }
 
 function extractEpisodePartToken(value) {
-  const match = String(value || "").match(/第\s*\d{1,4}\s*[集期话]\s*(?:[-_./|｜]\s*)?(?:[（(【\[]\s*)?([上中下])(?:\s*[）)】\]])?(?:\s*[（(【\[]\s*[一二三四五六七八九十\d]+\s*[）)】\]])?(?=\s*(?:$|[\s_.\-:：,，.。;；、]))/);
+  const match = String(value || "").match(/(?:[集期话日号]|\d)[\s_.\/|｜-]*(?:[（(【\[]\s*)?([上中下])(?=$|[\s_.\-:：,，。;；、）)】\]（(])/);
   return match ? match[1] : "";
 }
 
@@ -381,7 +393,7 @@ function normalizeEpisodeTitleText(value) {
     .replace(/\[[^\]]*\]/g, " ")
     .replace(/[【（(][^】）)]*[】）)]/g, " ")
     .replace(/\.(?:mp4|mkv|avi|rmvb|ts|flv|mov|m4v)\b/gi, " ")
-    .replace(/\b(?:2160p|1080p|720p|4k|web-?dl|web-?rip|blu-?ray|hdr|dv|x265|x264|h\.?265|h\.?264|60fps|aac|flac|dts)\b/gi, " ")
+    .replace(FONGMI_FILE_METADATA_RE, " ")
     .replace(/\b\d+(?:\.\d+)?\s*(?:gb|mb|g|m)\b/gi, " ")
     .replace(/20\d{6}/g, " ")
     .replace(/[_~.-]+/g, " ")
@@ -427,8 +439,7 @@ function scoreEpisodeTitleOverlap(episode, candidate) {
   return score;
 }
 
-function findTitleOverlapCandidate(episode, candidates) {
-  const focus = buildFongmiAiFocus(episode);
+function findTitleOverlapCandidate(episode, candidates, focus) {
   let scopedCandidates = candidates;
   if (focus?.episodeNo) {
     scopedCandidates = candidates.filter(candidate =>
@@ -454,21 +465,50 @@ function findTitleOverlapCandidate(episode, candidates) {
 function buildFongmiAiFocus(episode) {
   return {
     episodeNo: extractEpisodeNoFromRawEpisode(episode),
-    dateToken: extractDateToken(episode),
+    date: extractFongmiEpisodeDate(episode),
     partToken: extractEpisodePartToken(episode)
   };
 }
 
+// 作品、显式集号和上下集已由公共流程限定，这里只过滤日期冲突并判断日期是否足以直选。
+function selectDateCandidate(episode, focus, candidates) {
+  const oneWork = candidates.every(candidate => sameCandidateWork(candidates[0], candidate));
+  const dates = new Map(candidates.map(candidate => [candidate, extractFongmiEpisodeDate(candidate.episode?.episodeTitle)]));
+  const matches = candidates.filter(candidate => datesMatch(focus.date, dates.get(candidate)));
+  const remaining = candidates.filter(candidate => {
+    if (dates.get(candidate)) return matches.includes(candidate);
+    if (!matches.length) return true;
+    // 同一期的无日期版本留给 AI；不能把其他作品或其他期数混进来。
+    const episodeNo = extractCandidateEpisodeNo(candidate);
+    return episodeNo !== null && matches.some(match =>
+      sameCandidateWork(candidate, match) && extractCandidateEpisodeNo(match) === episodeNo);
+  });
+  candidates.splice(0, candidates.length, ...remaining);
+
+  if (/正片/.test(String(episode)) || FONGMI_SPECIAL_EPISODE_VERSION_RE.test(String(episode))) return null;
+  const confirmedDate = matches.length === 1 && (focus.date.year === null ||
+    dates.get(matches[0]).year !== null || focus.episodeNo !== null);
+  let candidate = confirmedDate && remaining.length === 1 && oneWork ? matches[0] : null;
+  if (!matches.length && oneWork) candidate = findTitleOverlapCandidate(episode, remaining, null);
+  if (candidate && (FONGMI_SPECIAL_EPISODE_VERSION_RE.test(candidate.episode?.episodeTitle || "") ||
+      (!focus.partToken && extractEpisodePartToken(candidate.episode?.episodeTitle)))) return null;
+  return candidate;
+}
+
 function extractRegularEpisodeNo(title) {
-  const text = String(title || "");
-  const match = text.match(/第\s*0*(\d{1,4})\s*([集期话])/);
+  // “第20190315期”是日期，不是第 20190315 期。
+  const text = String(title || "").replace(/第\s*((?:19|20)\d{6})\s*[集期话]/g,
+    (match, digits) => extractFongmiEpisodeDate(digits) ? " " : match);
+  const match = text.match(/第\s*([零〇一二三四五六七八九十百\d]+)\s*([集期话])/);
   if (!match) return null;
 
-  const episodeNo = parseInt(match[1], 10);
-  if (!Number.isInteger(episodeNo) || episodeNo <= 0) return null;
+  const episodeNo = convertChineseNumber(match[1]);
+  if (!Number.isInteger(episodeNo) || episodeNo <= 0 || episodeNo >= 10000) return null;
   return {
     value: String(episodeNo),
-    suffix: match[2]
+    suffix: match[2],
+    text: match[0],
+    index: match.index
   };
 }
 
@@ -487,8 +527,9 @@ function buildRegularEpisodePattern(title, episodeNo, suffix) {
 }
 
 function extractFocusedEpisodeNo(title) {
-  const regularEpisodeNo = extractRegularEpisodeNo(title);
-  if (regularEpisodeNo) return regularEpisodeNo.value;
+  const explicitEpisode = extractExplicitEpisode(title);
+  if (explicitEpisode) return explicitEpisode.value;
+  if (extractFongmiEpisodeDate(title)) return null;
 
   const text = normalizeCandidateTitle(title);
   const match = text.match(/(?:^|[_\s-])0*(\d{1,4})(?:\D*)$/);
@@ -629,10 +670,6 @@ function buildFocusedGroupPayload(group, focus) {
 
   if (payload.kind === "episodes" && Array.isArray(payload.episodes)) {
     let focusedEpisodes = payload.episodes.filter(([, title]) => String(extractFocusedEpisodeNo(title)) === String(targetEpisodeNo));
-    if (focus?.dateToken) {
-      const dateFocused = focusedEpisodes.filter(([, title]) => extractDateToken(title) === focus.dateToken);
-      if (dateFocused.length) focusedEpisodes = dateFocused;
-    }
     if (focus?.partToken) {
       const partFocused = focusedEpisodes.filter(([, title]) => extractEpisodePartToken(title) === focus.partToken);
       if (partFocused.length) focusedEpisodes = partFocused;
@@ -757,19 +794,28 @@ async function askFongmiAi(globals, payload, stage = "selectCandidate") {
 export async function selectFongmiCandidateByAi(globals, name, episode, candidates, matchedKeyword = name) {
   if (!candidates.length) return null;
 
-  const manualWork = narrowManualWorkCandidates(globals, name, matchedKeyword, episode, candidates);
-  if (narrowExplicitPartCandidates(episode, candidates)) return null;
+  const matchingEpisode = stripEpisodeCollectionMetadata(episode);
+  const focus = buildFongmiAiFocus(matchingEpisode);
+  const preferredWork = findPreferredWork(globals, name, matchedKeyword, candidates);
+  const manualWork = preferredWork?.explicit === true;
+  if (manualWork || (focus.date && preferredWork)) {
+    candidates.splice(0, candidates.length, ...preferredWork.candidates);
+  }
+  if (narrowFocusedCandidates(focus, candidates, manualWork)) return null;
   if (!candidates.length) return null;
 
-  const preferredCandidate = findPreferredCandidate(name, matchedKeyword, episode, candidates, !manualWork);
+  const preferredCandidate = focus.date
+    ? selectDateCandidate(matchingEpisode, focus, candidates)
+    : findPreferredCandidate(matchingEpisode, focus, candidates, findPreferredWork(globals, name, matchedKeyword, candidates));
+  if (!candidates.length) return null;
   if (preferredCandidate) {
     keepOnlyCandidate(candidates, preferredCandidate);
     return preferredCandidate;
   }
 
   const candidatesFromSameWork = candidates.every(candidate => sameCandidateWork(candidates[0], candidate));
-  if (candidatesFromSameWork) {
-    const titleOverlapCandidate = findTitleOverlapCandidate(episode, candidates);
+  if (!focus.date && candidatesFromSameWork) {
+    const titleOverlapCandidate = findTitleOverlapCandidate(matchingEpisode, candidates, focus);
     if (titleOverlapCandidate) {
       keepOnlyCandidate(candidates, titleOverlapCandidate);
       return titleOverlapCandidate;
@@ -777,18 +823,19 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
   }
 
   if (!globals.aiValid || !globals.aiApiKey) {
-    if (manualWork) candidates.splice(0, candidates.length);
+    if (manualWork || focus.date) candidates.splice(0, candidates.length);
     else keepOnlyTopCandidate(candidates);
     return null;
   }
-  if (!manualWork && !shouldUseFongmiAi(candidates)) {
+  if (!focus.date && !manualWork && !shouldUseFongmiAi(candidates)) {
     log("info", `[Fongmi][AI] skipped: local score is confident for ${candidates[0].anime?.animeTitle || ""}`);
     keepOnlyTopCandidate(candidates);
     return null;
   }
 
   const groups = buildCandidateGroups(candidates);
-  const focus = buildFongmiAiFocus(episode);
+  // 日期候选已过滤；保留其中的无日期版本，避免二次聚焦时丢失。
+  const aiFocus = focus.date ? null : focus;
   const aiName = globals.lastSelectMap.get(name)?.fongmiCorrectedTitle || name;
 
   try {
@@ -800,7 +847,7 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
         mode: "selectCandidate",
         name: aiName,
         episodeRaw: episode,
-        groups: groups.map(group => buildFocusedGroupPayload(group, focus))
+        groups: groups.map(group => buildFocusedGroupPayload(group, aiFocus))
       };
     } else {
       if (groups.length === 1) {
@@ -809,7 +856,7 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
           mode: "selectCandidate",
           name: aiName,
           episodeRaw: episode,
-          groups: [buildFocusedGroupPayload(groups[0], focus)]
+          groups: [buildFocusedGroupPayload(groups[0], aiFocus)]
         };
       } else {
         const groupResponse = await askFongmiAi(globals, {
@@ -833,7 +880,7 @@ export async function selectFongmiCandidateByAi(globals, name, episode, candidat
           mode: "selectCandidate",
           name: aiName,
           episodeRaw: episode,
-          groups: [buildFocusedGroupPayload(selectedGroup, focus)]
+          groups: [buildFocusedGroupPayload(selectedGroup, aiFocus)]
         };
       }
     }
