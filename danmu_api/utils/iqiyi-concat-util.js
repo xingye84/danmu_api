@@ -44,6 +44,16 @@ export function decodeIqiyiConcat(value) {
   return decodeIqiyiConcatPayload(value).urls;
 }
 
+// 未合并的编号分段只能直接匹配明确请求的同一段，不能作为完整期数返回。
+export function isIqiyiFongmiPartCompatible(episode, rawEpisode) {
+  const candidate = String(episode?.episodeTitle || '').match(SPLIT_RE);
+  if (!candidate) return true;
+  const requested = String(rawEpisode || '').match(PART_PATTERN);
+  return Boolean(requested && Number(candidate[1]) === Number(requested[1]) &&
+    candidate[2] === requested[2] && partNumber(candidate[3]) > 0 &&
+    partNumber(candidate[3]) === partNumber(requested[3]));
+}
+
 export function prepareIqiyiFongmiEpisodes(episodes, rawEpisode = '') {
   // 在通用去重之前移除无效占位字段，否则所有“第0集”会被当作同一集。
   const normalized = episodes.map(episode => ({

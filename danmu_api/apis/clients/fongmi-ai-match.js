@@ -4,6 +4,7 @@ import { httpPost } from "../../utils/http-util.js";
 import { setRedisKey } from "../../utils/redis-util.js";
 import { setLocalRedisKey } from "../../utils/local-redis-util.js";
 import { convertChineseNumber } from "../../utils/common-util.js";
+import { canSelectFongmiOrdinalCandidate } from "./fongmi-ordinal-candidate.js";
 
 const FONGMI_AI_STRONG_SCORE = 4000;
 const FONGMI_AI_SAFE_SCORE_GAP = 5000;
@@ -489,8 +490,11 @@ function selectDateCandidate(episode, focus, candidates) {
   const confirmedDate = matches.length === 1 && (focus.date.year === null ||
     dates.get(matches[0]).year !== null || focus.episodeNo !== null);
   let candidate = confirmedDate && remaining.length === 1 && oneWork ? matches[0] : null;
-  if (!matches.length && oneWork) candidate = findTitleOverlapCandidate(episode, remaining, null);
-  if (candidate && (FONGMI_SPECIAL_EPISODE_VERSION_RE.test(candidate.episode?.episodeTitle || "") ||
+  // 明确期数已筛选且日期冲突已排除；唯一候选缺少日期时仍可按期数命中。
+  if (!candidate && focus.episodeNo && remaining.length === 1 && oneWork) candidate = remaining[0];
+  if (!candidate && !matches.length && oneWork) candidate = findTitleOverlapCandidate(episode, remaining, null);
+  if (candidate && (!canSelectFongmiOrdinalCandidate(episode, candidate) ||
+      FONGMI_SPECIAL_EPISODE_VERSION_RE.test(candidate.episode?.episodeTitle || "") ||
       (!focus.partToken && extractEpisodePartToken(candidate.episode?.episodeTitle)))) return null;
   return candidate;
 }

@@ -203,7 +203,7 @@ test("FongMi dates preserve Episode ordinals when several episodes share a date"
 
 test("FongMi preserves bracketed explicit ordinals in ordinary and dated filenames", async () => {
   for (const [open, close] of [["[", "]"], ["【", "】"], ["(", ")"], ["（", "）"]]) {
-    for (const label of ["第13期", "第十三期", "Episode13", "S01E13"]) {
+    for (const label of ["第13期", "第十三期", "Episode13", "S04E13"]) {
       for (const date of ["", "2019-03-15"]) {
         const globals = reset("manual");
         const wrong = candidate("wrong-number", 14, date);
@@ -544,7 +544,7 @@ test("FongMi ordinary episode numbers still use the existing preference matching
 });
 
 test("FongMi ordinary and dated requests share explicit episode and part rules", async () => {
-  for (const prefix of ["第十三期", "Episode13", "S01E13"]) {
+  for (const prefix of ["第十三期", "Episode13", "S04E13"]) {
     for (const date of ["", "2019-03-15"]) {
       for (const separator of ["", "/", "|", "｜"]) {
         const globals = reset("manual");
