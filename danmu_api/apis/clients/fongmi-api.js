@@ -3,7 +3,7 @@ import { jsonResponse } from "../../utils/http-util.js";
 import { log } from "../../utils/log-util.js";
 import { simplized } from "../../utils/zh-util.js";
 import { convertChineseNumber, extractEpisodeTitle, extractEpisodeNumberFromTitle, extractSeasonNumberFromAnimeTitle, getExplicitSeasonNumber, stripNonTitleChars } from "../../utils/common-util.js";
-import { filterSameEpisodeTitle, getBangumiDataForMatch } from "../dandan-api.js";
+import { filterEpisodesByTitle, filterSameEpisodeTitle, getBangumiDataForMatch } from "../dandan-api.js";
 import { selectFongmiCandidateByAi } from "./fongmi-ai-match.js";
 import { rememberFongmiSearchContext } from "./fongmi-prefer.js";
 import { getFongmiCorrectedTitle } from "./fongmi-manual-correction.js";
@@ -368,7 +368,7 @@ function buildFongmiDanmakuItems(animes, detailStore, apiBase, rawEpisode) {
 
     let episodes = bangumiData.bangumi.episodes;
     if (globals.enableAnimeEpisodeFilter) {
-      episodes = episodes.filter(item => !globals.episodeTitleFilter.test(item.episodeTitle));
+      episodes = filterEpisodesByTitle(episodes);
     }
     if (anime.source === "iqiyi") episodes = prepareIqiyiFongmiEpisodes(episodes, rawEpisode);
     episodes = filterSameEpisodeTitle(episodes);
