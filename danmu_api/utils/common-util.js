@@ -1,6 +1,7 @@
 import { globals } from '../configs/globals.js';
 import { log } from './log-util.js'
 import { simplized } from './zh-util.js';
+import { hasConflictingCompactSeason } from './compact-season-title-util.js';
 
 // =====================
 // 通用工具方法
@@ -285,6 +286,8 @@ export function titleMatches(title, query, parsedSeason = null, forceNonStrict =
   const titleText = String(title);
   const queryText = String(query);
   if (!titleText || !queryText) return false;
+
+  if (hasConflictingCompactSeason(titleText, queryText, parsedSeason, normalizeTitleForMatch, getExplicitSeasonNumber, globals.titleNoiseFilter)) return false;
 
   // 策略1：严格模式仅允许头部或完全匹配（forceNonStrict 为 true 时跳过，用于偏好记录等场景）
   if (!forceNonStrict && globals.strictTitleMatch) return strictTitleMatch(titleText, queryText);
