@@ -62,3 +62,30 @@ for (const strict of [false, true]) {
     assert.equal(source.getEpisodes.mock.callCount(), 0);
   });
 }
+
+test('configured platform ranking keeps the manually corrected FongMi title and saved source', async t => {
+  resetState();
+  globals.titlePlatformMap = new Map([['播放器别名', 'qq']]);
+  globals.sourceOrderArr = ['tencent', 'youku'];
+  globals.lastSelectMap.set('播放器别名', {
+    fongmiCorrectedTitle: '手动确认剧名',
+    sourceBySeason: { default: 'youku' }
+  });
+  t.mock.method(getSourceByKey('tencent'), 'search', async () => {
+    assert.fail('saved source should be tried first');
+  });
+  const source = getSourceByKey('youku');
+  t.mock.method(source, 'search', async keyword => {
+    assert.equal(keyword, '手动确认剧名');
+    return [{ title: keyword, mediaId: 'corrected-anime', type: '电视剧', year: 2026 }];
+  });
+  t.mock.method(source, 'getEpisodes', async () => [
+    { id: 'corrected-episode', title: '第1集', displayName: '第1集', link: 'https://v.youku.com/v_show/id_corrected.html' }
+  ]);
+
+  const url = new URL('https://test.invalid/api/v2/fongmi/danmaku?name=播放器别名&episode=第1集');
+  const items = await (await getFongmiDanmaku(url, new Request(url))).json();
+  assert.equal(items.length, 1);
+  assert.match(items[0].name, /^手动确认剧名/);
+  assert.equal(getSourceByKey('tencent').search.mock.callCount(), 0);
+});

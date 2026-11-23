@@ -30,28 +30,28 @@ export function buildFongmiCompactSeasonKeywords(keywords) {
   return variants;
 }
 
-async function searchWithSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, sources, cacheKeySuffix) {
+async function searchWithSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, sources, cacheKeySuffix, preference) {
   const response = await searchAnime(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, {
     sourceOrderOverride: sources,
     cacheKeySuffix
-  });
+  }, preference);
   normalizeFongmiDetailStoreEpisodeTitles(detailStore);
   return response;
 }
 
-async function searchWithDefaultSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform) {
-  const response = await searchAnime(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform);
+async function searchWithDefaultSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, preference) {
+  const response = await searchAnime(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, undefined, preference);
   normalizeFongmiDetailStoreEpisodeTitles(detailStore);
   return response;
 }
 
-export async function searchFongmiAnimeBySourcePreference(searchUrl, preferAnimeId = null, preferSource = null, detailStore = null, targetPlatform = null, preferTitle = null) {
+export async function searchFongmiAnimeBySourcePreference(searchUrl, preferAnimeId = null, preferSource = null, detailStore = null, targetPlatform = null, preferTitle = null, preference = undefined) {
   const keyword = searchUrl.searchParams.get("keyword");
   const [, savedSource] = getPreferAnimeId(preferTitle || keyword);
   const canUsePreferredSource = savedSource && globals.sourceOrderArr.includes(savedSource);
 
   if (!canUsePreferredSource) {
-    return searchWithDefaultSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform);
+    return searchWithDefaultSourceOrder(searchUrl, preferAnimeId, preferSource, detailStore, targetPlatform, preference);
   }
 
   const preferredRes = await searchWithSourceOrder(
@@ -61,11 +61,12 @@ export async function searchFongmiAnimeBySourcePreference(searchUrl, preferAnime
     detailStore,
     targetPlatform,
     [savedSource],
-    `fongmi-source:${savedSource}`
+    `fongmi-source:${savedSource}`,
+    preference
   );
   const preferredData = await preferredRes.json();
   const preferredAnimes = toSearchAnimes(preferredData);
-  if (preferredAnimes.length) {
+  if (preferredAnimes.some(anime => !preference || preference.matches(anime))) {
     log("info", `[Fongmi][Prefer] search preferred source hit: keyword=${keyword}, source=${savedSource}, count=${preferredAnimes.length}`);
     return jsonResponse(preferredData, preferredRes.status);
   }
@@ -79,6 +80,7 @@ export async function searchFongmiAnimeBySourcePreference(searchUrl, preferAnime
     detailStore,
     targetPlatform,
     remainingSources,
-    `fongmi-source-fallback:${savedSource}:${remainingSources.join(",")}`
+    `fongmi-source-fallback:${savedSource}:${remainingSources.join(",")}`,
+    preference
   );
 }
